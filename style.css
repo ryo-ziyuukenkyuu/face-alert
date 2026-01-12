@@ -1,0 +1,31 @@
+body {
+  font-family: sans-serif;
+  text-align: center;
+  background: #111;
+  color: #fff;
+}
+
+video {
+  width: 100%;
+  max-width: 400px;
+  transform: scaleX(-1);
+}
+
+.panel {
+  margin-top: 10px;
+  padding: 10px;
+  background: #222;
+  border-radius: 8px;
+}
+
+.panel div {
+  margin: 4px 0;
+  font-size: 16px;
+}
+
+button {
+  padding: 8px 16px;
+  font-size: 16px;
+  border-radius: 6px;
+  border: none;
+}
