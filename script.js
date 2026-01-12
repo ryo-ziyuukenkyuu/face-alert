@@ -38,6 +38,10 @@ let faceMissingStart = null;
 let lastHardAlarmTime = 0;
 const HARD_ALARM_INTERVAL = 500; // 0.5秒
 
+// カメラ切替用
+let currentFacingMode = "user"; // "user" 内カメラ / "environment" 外カメラ
+let cameraInstance = null;
+
 // UI
 const toggleBtn = document.getElementById("toggleBtn");
 const statusText = document.getElementById("statusText");
@@ -65,6 +69,7 @@ const eyeSlider = document.getElementById("eyeSlider");
 const eyeLimit = document.getElementById("eyeLimit");
 
 const calibBtn = document.getElementById("calibBtn");
+const switchCamBtn = document.getElementById("switchCamBtn"); // 新規追加
 
 // --- スライダー連動 ---
 yawSlider.oninput = () => { MAX_YAW = +yawSlider.value; yawLimit.textContent = MAX_YAW; };
@@ -120,6 +125,13 @@ calibBtn.onclick = () => {
   stopAlarms();
 };
 
+// --- カメラ切替 ---
+switchCamBtn.onclick = async () => {
+  currentFacingMode = (currentFacingMode === "user" ? "environment" : "user");
+  if(cameraInstance){ cameraInstance.stop(); video.srcObject = null; }
+  await startCamera();
+};
+
 // --- FaceMesh ---
 const faceMesh = new FaceMesh({ locateFile: f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
 faceMesh.setOptions({ maxNumFaces:1 });
@@ -129,11 +141,14 @@ function dist(a,b){return Math.hypot(a.x-b.x, a.y-b.y);}
 async function startCamera() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { width:640, height:480, facingMode:"user" },
+      video: { width:640, height:480, facingMode: currentFacingMode },
       audio: false
     });
     video.srcObject = stream;
     await video.play();
+    if(cameraInstance) cameraInstance.stop();
+    cameraInstance = new Camera(video,{ onFrame: async()=>await faceMesh.send({image:video}), width:640, height:480 });
+    cameraInstance.start();
   } catch(err){ console.error("カメラ取得失敗:", err); }
 }
 startCamera();
