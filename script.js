@@ -66,7 +66,7 @@ const eyeLimit = document.getElementById("eyeLimit");
 
 const calibBtn = document.getElementById("calibBtn");
 
-// スライダー連動
+// --- スライダー連動 ---
 yawSlider.oninput = () => { MAX_YAW = +yawSlider.value; yawLimit.textContent = MAX_YAW; };
 pitchSlider.oninput = () => { MAX_PITCH_DEG = +pitchSlider.value; pitchLimit.textContent = MAX_PITCH_DEG; };
 timeSlider.oninput = () => { ALARM_DELAY = +timeSlider.value; timeLimit.textContent = ALARM_DELAY.toFixed(1); };
@@ -75,7 +75,7 @@ noseSlider.oninput = () => { NOSE_CHIN_RATIO_THRESHOLD = +noseSlider.value; nose
 areaSlider.oninput = () => { FACE_AREA_RATIO_THRESHOLD = +areaSlider.value; areaLimit.textContent = FACE_AREA_RATIO_THRESHOLD.toFixed(2); };
 eyeSlider.oninput = () => { EYE_VISIBILITY_THRESHOLD = +eyeSlider.value; eyeLimit.textContent = EYE_VISIBILITY_THRESHOLD.toFixed(2); };
 
-// アラーム制御
+// --- アラーム制御 ---
 function playSoft(){
   const now = performance.now();
   if(now - lastSoftAlarmTime >= SOFT_ALARM_INTERVAL){
@@ -100,7 +100,7 @@ function stopAlarms(){
   lastSoftAlarmTime=0; lastHardAlarmTime=0;
 }
 
-// 開始/停止
+// --- 開始/停止 ---
 toggleBtn.onclick = () => {
   isRunning = !isRunning;
   if(isRunning){
@@ -111,7 +111,7 @@ toggleBtn.onclick = () => {
   }
 };
 
-// キャリブ
+// --- キャリブ ---
 calibBtn.onclick = () => {
   yawZeroOffset = latestYaw;
   pitchZeroOffset = latestPitch;
@@ -120,17 +120,31 @@ calibBtn.onclick = () => {
   stopAlarms();
 };
 
-// FaceMesh
+// --- FaceMesh ---
 const faceMesh = new FaceMesh({ locateFile: f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
 faceMesh.setOptions({ maxNumFaces:1 });
 function dist(a,b){return Math.hypot(a.x-b.x, a.y-b.y);}
 
+// --- カメラ取得（自動露出ON） ---
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width:640, height:480, facingMode:"user" },
+      audio: false
+    });
+    video.srcObject = stream;
+    await video.play();
+  } catch(err){ console.error("カメラ取得失敗:", err); }
+}
+startCamera();
+
+// --- 顔検出結果処理 ---
 faceMesh.onResults(res=>{
   if(!isRunning) return;
   const now = performance.now();
 
   // 強度アラーム: 顔未検出
-  if(res.multiFaceLandmarks.length===0){
+  if(!res.multiFaceLandmarks || res.multiFaceLandmarks.length===0){
     if(!faceMissingStart) faceMissingStart=now;
     const elapsed=(now-faceMissingStart)/1000;
     if(elapsed>=FACE_MISSING_DELAY){
@@ -179,7 +193,6 @@ faceMesh.onResults(res=>{
     eye: eyeRatio<EYE_VISIBILITY_THRESHOLD
   };
 
-  // 各軽度アラーム独立管理
   for(let key of alarmKeys){
     if(conditions[key]){
       if(!alertTimers[key]) alertTimers[key]=now;
@@ -201,6 +214,6 @@ faceMesh.onResults(res=>{
   }
 });
 
-// カメラ開始
+// --- Camera開始 ---
 const camera=new Camera(video,{onFrame: async()=>await faceMesh.send({image:video})});
 camera.start();
