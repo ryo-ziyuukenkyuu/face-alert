@@ -1,26 +1,28 @@
 const video = document.getElementById("video");
 const alarm = document.getElementById("alarm");
 
-// ===== 状態管理 =====
+// ===== 状態 =====
 let isRunning = false;
+let currentFacingMode = "user"; // user / environment
+let camera = null;
 
-// ===== 設定値 =====
+// ===== 設定 =====
 let MAX_YAW = 80;
 let MAX_PITCH_DEG = 25;
 let ALARM_DELAY = 0.3;
 
 const PITCH_FIXED_OFFSET = -18;
 
-// キャリブ
 let yawZeroOffset = 0;
 let pitchZeroOffset = 0;
-
-// NG継続
 let overStartTime = null;
 
 // ===== UI =====
 const toggleBtn = document.getElementById("toggleBtn");
 const statusText = document.getElementById("statusText");
+
+const cameraBtn = document.getElementById("cameraBtn");
+const cameraStatus = document.getElementById("cameraStatus");
 
 const yawSlider = document.getElementById("yawSlider");
 const pitchSlider = document.getElementById("pitchSlider");
@@ -70,39 +72,7 @@ function stopAlarm() {
   }
 }
 
-// ===== 角度計算 =====
-function toDeg(rad) {
-  return rad * 180 / Math.PI;
-}
-
-function calcYaw(leftEye, rightEye) {
-  const dx = rightEye.x - leftEye.x;
-  const dz = rightEye.z - leftEye.z;
-  return toDeg(Math.atan2(dz, dx));
-}
-
-function calcPitchIndex(eyesCenter, nose, chin) {
-  const faceHeight = chin.y - eyesCenter.y;
-  const noseOffset = nose.y - eyesCenter.y;
-  return (noseOffset / faceHeight) * 40;
-}
-
-function pitchIndexToDegree(index) {
-  return index * 1.2;
-}
-
-let latestYaw = 0;
-let latestPitch = 0;
-
-// ===== キャリブ =====
-calibBtn.onclick = () => {
-  yawZeroOffset = latestYaw;
-  pitchZeroOffset = latestPitch;
-  overStartTime = null;
-  stopAlarm();
-};
-
-// ===== 開始／停止トグル =====
+// ===== 開始／停止 =====
 toggleBtn.onclick = () => {
   isRunning = !isRunning;
 
@@ -110,19 +80,42 @@ toggleBtn.onclick = () => {
     toggleBtn.textContent = "■ 停止";
     toggleBtn.className = "stop";
     statusText.textContent = "🟢 作動中";
-
-    enableAudio(); // iPhone対策
+    enableAudio();
   } else {
     toggleBtn.textContent = "▶ 開始";
     toggleBtn.className = "start";
     statusText.textContent = "🔴 停止中";
-
     stopAlarm();
     overStartTime = null;
   }
 };
 
-// ===== MediaPipe =====
+// ===== カメラ切替 =====
+cameraBtn.onclick = async () => {
+  currentFacingMode =
+    currentFacingMode === "user" ? "environment" : "user";
+
+  cameraStatus.textContent =
+    currentFacingMode === "user" ? "🤳 インカメ" : "📷 外カメラ";
+
+  cameraBtn.textContent =
+    currentFacingMode === "user" ? "📷 外カメラ" : "🤳 インカメ";
+
+  await restartCamera();
+};
+
+// ===== キャリブ =====
+let latestYaw = 0;
+let latestPitch = 0;
+
+calibBtn.onclick = () => {
+  yawZeroOffset = latestYaw;
+  pitchZeroOffset = latestPitch;
+  overStartTime = null;
+  stopAlarm();
+};
+
+// ===== FaceMesh =====
 const faceMesh = new FaceMesh({
   locateFile: (file) =>
     `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
@@ -135,6 +128,22 @@ faceMesh.setOptions({
   minTrackingConfidence: 0.5,
 });
 
+function toDeg(rad) {
+  return rad * 180 / Math.PI;
+}
+
+function calcYaw(l, r) {
+  return toDeg(Math.atan2(r.z - l.z, r.x - l.x));
+}
+
+function calcPitchIndex(eyes, nose, chin) {
+  return ((nose.y - eyes.y) / (chin.y - eyes.y)) * 40;
+}
+
+function pitchIndexToDegree(i) {
+  return i * 1.2;
+}
+
 faceMesh.onResults((results) => {
   if (!isRunning) return;
 
@@ -144,21 +153,20 @@ faceMesh.onResults((results) => {
   }
 
   const lm = results.multiFaceLandmarks[0];
-
   const leftEye = lm[33];
   const rightEye = lm[263];
   const nose = lm[1];
   const chin = lm[152];
 
-  const eyesCenter = {
+  const eyes = {
     x: (leftEye.x + rightEye.x) / 2,
     y: (leftEye.y + rightEye.y) / 2,
   };
 
   const rawYaw = calcYaw(leftEye, rightEye);
-  const pitchIndex = calcPitchIndex(eyesCenter, nose, chin);
   const rawPitch =
-    pitchIndexToDegree(pitchIndex) + PITCH_FIXED_OFFSET;
+    pitchIndexToDegree(calcPitchIndex(eyes, nose, chin)) +
+    PITCH_FIXED_OFFSET;
 
   const yaw = rawYaw - yawZeroOffset;
   const pitch = rawPitch - pitchZeroOffset;
@@ -169,28 +177,35 @@ faceMesh.onResults((results) => {
   yawText.textContent = yaw.toFixed(1);
   pitchText.textContent = pitch.toFixed(1);
 
-  const isOver =
+  const over =
     Math.abs(yaw) > MAX_YAW || pitch > MAX_PITCH_DEG;
 
   const now = performance.now();
 
-  if (isOver) {
-    if (overStartTime === null) overStartTime = now;
-    const elapsed = (now - overStartTime) / 1000;
-    if (elapsed >= ALARM_DELAY) playAlarm();
+  if (over) {
+    if (!overStartTime) overStartTime = now;
+    if ((now - overStartTime) / 1000 >= ALARM_DELAY) playAlarm();
   } else {
     overStartTime = null;
     stopAlarm();
   }
 });
 
-// ===== カメラ =====
-const camera = new Camera(video, {
-  onFrame: async () => {
-    await faceMesh.send({ image: video });
-  },
-  width: 640,
-  height: 480,
-});
+// ===== カメラ起動／再起動 =====
+async function restartCamera() {
+  if (camera) camera.stop();
 
-camera.start();
+  camera = new Camera(video, {
+    onFrame: async () => {
+      await faceMesh.send({ image: video });
+    },
+    width: 640,
+    height: 480,
+    facingMode: currentFacingMode,
+  });
+
+  await camera.start();
+}
+
+// 初期起動
+restartCamera();
