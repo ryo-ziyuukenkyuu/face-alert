@@ -3,16 +3,17 @@ const alarm = document.getElementById("alarm");
 
 // ===== 状態 =====
 let isRunning = false;
-let currentFacingMode = "user"; // user / environment
+let currentFacingMode = "user";
 let camera = null;
 
-// ===== 設定 =====
+// ===== 設定（初期値） =====
 let MAX_YAW = 80;
 let MAX_PITCH_DEG = 25;
 let ALARM_DELAY = 0.3;
 
 const PITCH_FIXED_OFFSET = -18;
 
+// キャリブ（保存しない）
 let yawZeroOffset = 0;
 let pitchZeroOffset = 0;
 let overStartTime = null;
@@ -37,20 +38,55 @@ const pitchText = document.getElementById("pitchValue");
 
 const calibBtn = document.getElementById("calibBtn");
 
+// ===== localStorage 読み込み =====
+function loadSettings() {
+  const y = localStorage.getItem("faceAlert_yaw");
+  const p = localStorage.getItem("faceAlert_pitch");
+  const t = localStorage.getItem("faceAlert_time");
+
+  if (y !== null) {
+    MAX_YAW = parseInt(y);
+    yawSlider.value = MAX_YAW;
+    yawLimit.textContent = MAX_YAW;
+  }
+
+  if (p !== null) {
+    MAX_PITCH_DEG = parseInt(p);
+    pitchSlider.value = MAX_PITCH_DEG;
+    pitchLimit.textContent = MAX_PITCH_DEG;
+  }
+
+  if (t !== null) {
+    ALARM_DELAY = parseFloat(t);
+    timeSlider.value = ALARM_DELAY;
+    timeLimit.textContent = ALARM_DELAY.toFixed(1);
+  }
+}
+
+// ===== localStorage 保存 =====
+function saveSettings() {
+  localStorage.setItem("faceAlert_yaw", MAX_YAW);
+  localStorage.setItem("faceAlert_pitch", MAX_PITCH_DEG);
+  localStorage.setItem("faceAlert_time", ALARM_DELAY);
+}
+
 // ===== スライダー =====
 yawSlider.oninput = () => {
   MAX_YAW = parseInt(yawSlider.value);
   yawLimit.textContent = MAX_YAW;
+  saveSettings();
 };
 
 pitchSlider.oninput = () => {
   MAX_PITCH_DEG = parseInt(pitchSlider.value);
   pitchLimit.textContent = MAX_PITCH_DEG;
+  saveSettings();
 };
 
 timeSlider.oninput = () => {
   ALARM_DELAY = parseFloat(timeSlider.value);
   timeLimit.textContent = ALARM_DELAY.toFixed(1);
+  saveSettings();
 };
 
 // ===== 音 =====
@@ -104,7 +140,7 @@ cameraBtn.onclick = async () => {
   await restartCamera();
 };
 
-// ===== キャリブ =====
+// ===== キャリブ（保存しない） =====
 let latestYaw = 0;
 let latestPitch = 0;
 
@@ -191,7 +227,7 @@ faceMesh.onResults((results) => {
   }
 });
 
-// ===== カメラ起動／再起動 =====
+// ===== カメラ起動 =====
 async function restartCamera() {
   if (camera) camera.stop();
 
@@ -207,5 +243,6 @@ async function restartCamera() {
   await camera.start();
 }
 
-// 初期起動
+// ===== 初期処理 =====
+loadSettings();
 restartCamera();
