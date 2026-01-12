@@ -1,68 +1,111 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Face Alert</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Face Alert</title>
 
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
-  <link rel="stylesheet" href="style.css" />
+<style>
+  .alert-panel { font-size: 1.2em; font-weight: bold; }
+  .safe { color: green; }
+  .warning { color: orange; }
+  .danger { color: red; }
+  button.start { background-color: green; color: white; }
+  button.stop { background-color: red; color: white; }
+</style>
 </head>
 <body>
 
-  <h2>Face Alert</h2>
+<!-- 1. 題名 -->
+<h2>Face Alert</h2>
 
-  <video id="video" autoplay muted playsinline></video>
+<!-- 2. カメラ画面 -->
+<video id="video" autoplay muted playsinline></video>
 
-  <div class="panel">
-    <button id="toggleBtn" class="start">▶ 開始</button>
-    <div id="statusText">🔴 停止中</div>
-  </div>
+<!-- 3. 開始/停止ボタン -->
+<div>
+  <button id="toggleBtn" class="start">▶ 開始</button>
+  <div id="statusText">🔴 停止中</div>
+</div>
 
-  <div class="panel">
-    <button id="cameraBtn">📷 外カメラ</button>
-    <div id="cameraStatus">🤳 インカメ</div>
-  </div>
+<!-- 4. 異常表示 -->
+<div class="alert-panel">
+  <div id="alertReason" class="safe">異常なし</div>
+</div>
 
-  <div class="panel">
-    <label>
-      左右許容角度（Yaw）：
-      <input type="range" id="yawSlider" min="30" max="90" step="5" value="80" />
-    </label>
-    <div><span id="yawLimit">80</span>°</div>
-  </div>
+<hr>
 
-  <div class="panel">
-    <label>
-      上下許容角度（Pitch）：
-      <input type="range" id="pitchSlider" min="5" max="45" step="5" value="25" />
-    </label>
-    <div><span id="pitchLimit">25</span>°</div>
-  </div>
+<!-- 6. 現在値 -->
+<div id="currentValues">
+  <div>Yaw：<span id="yawValue">0</span>°</div>
+  <div>Pitch：<span id="pitchValue">0</span>°</div>
+  <div>鼻‐顎距離比：<span id="noseValue">1.00</span></div>
+  <div>顔面積比：<span id="areaValue">1.00</span></div>
+  <div>目の可視率：<span id="eyeValue">1.00</span></div>
+</div>
 
-  <div class="panel">
-    <label>
-      継続時間：
-      <input type="range" id="timeSlider" min="0" max="1" step="0.1" value="0.3" />
-    </label>
-    <div><span id="timeLimit">0.3</span> 秒</div>
-  </div>
+<hr>
 
-  <div class="panel">
-    <button id="calibBtn">0点キャリブレーション</button>
-  </div>
+<!-- 8. 設定値 -->
+<div id="settingsValues">
+  <label>Yaw許容角度
+    <input type="range" id="yawSlider" min="30" max="120" step="5" value="80">
+    <span id="yawLimit">80</span>°
+  </label>
 
-  <div class="panel">
-    <div>Yaw：<span id="yawValue">0</span>°</div>
-    <div>Pitch：<span id="pitchValue">0</span>°</div>
-  </div>
+  <label>Pitch許容角度
+    <input type="range" id="pitchSlider" min="5" max="60" step="5" value="25">
+    <span id="pitchLimit">25</span>°
+  </label>
 
-  <audio id="alarm" loop>
-    <source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg">
-  </audio>
+  <hr>
 
-  <script src="script.js"></script>
+  <label>姿勢異常 継続時間（推奨0〜1秒）
+    <input type="range" id="timeSlider" min="0" max="1" step="0.1" value="0.8">
+    <span id="timeLimit">0.8</span> 秒
+  </label>
+
+  <label>顔未検出 継続時間（推奨2〜5秒）
+    <input type="range" id="faceMissingSlider" min="1" max="5" step="0.5" value="3">
+    <span id="faceMissingLimit">3.0</span> 秒
+  </label>
+
+  <hr>
+
+  <label>鼻‐顎距離比
+    <input type="range" id="noseSlider" min="0.3" max="0.9" step="0.05" value="0.55">
+    <span id="noseLimit">0.55</span>
+  </label>
+
+  <label>顔面積比
+    <input type="range" id="areaSlider" min="0.3" max="0.9" step="0.05" value="0.6">
+    <span id="areaLimit">0.60</span>
+  </label>
+
+  <label>目の可視率
+    <input type="range" id="eyeSlider" min="0.2" max="0.9" step="0.05" value="0.4">
+    <span id="eyeLimit">0.40</span>
+  </label>
+</div>
+
+<!-- 9. 0点キャリブレーションボタン -->
+<div>
+  <button id="calibBtn">🎯 0点キャリブレーション</button>
+</div>
+
+<!-- 10. アラーム音 -->
+<audio id="softAlarm">
+  <source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg">
+</audio>
+
+<audio id="hardAlarm">
+  <source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg">
+</audio>
+
+<!-- 11. スクリプト -->
+<script src="script.js"></script>
 </body>
 </html>

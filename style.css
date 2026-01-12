@@ -1,13 +1,13 @@
 body {
   font-family: sans-serif;
-  text-align: center;
   background: #111;
   color: #fff;
+  text-align: center;
 }
 
 video {
   width: 100%;
-  max-width: 400px;
+  max-width: 420px;
   transform: scaleX(-1);
 }
 
@@ -18,9 +18,10 @@ video {
   border-radius: 8px;
 }
 
-.panel div {
-  margin: 6px 0;
-  font-size: 16px;
+.alert-panel {
+  background: #300;
+  color: #ff8080;
+  font-weight: bold;
 }
 
 button {
@@ -39,4 +40,9 @@ button.start {
 button.stop {
   background: #e74c3c;
   color: #000;
+}
+
+label {
+  display: block;
+  margin-top: 10px;
 }
