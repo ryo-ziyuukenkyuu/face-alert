@@ -136,12 +136,9 @@ function dist(a,b){return Math.hypot(a.x-b.x, a.y-b.y);}
 // --- カメラ取得 ---
 async function startCamera() {
   try {
-    if(cameraInstance){
-      cameraInstance.stop();
-      cameraInstance = null;
-    }
+    if(cameraInstance){ cameraInstance.stop(); cameraInstance=null; }
 
-    const constraints = { video: { width:640, height:480, facingMode: currentFacingMode }, audio: false };
+    const constraints = { video: { width:640, height:480, facingMode: currentFacingMode }, audio:false };
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
 
     video.srcObject = stream;
@@ -231,7 +228,3 @@ faceMesh.onResults(res=>{
     alertReason.textContent="異常なし"; alertReason.className="safe";
   }
 });
-
-// --- Camera初期化（再確認用） ---
-cameraInstance = new Camera(video, { onFrame: async()=>await faceMesh.send({image:video}), width:640, height:480 });
-cameraInstance.start();
