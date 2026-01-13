@@ -30,13 +30,13 @@ const alarmKeys = ["yaw","pitch","nose","area","eye"];
 let alertTimers = {};
 let softAlarmActive = false;
 let lastSoftAlarmTime = 0;
-const SOFT_ALARM_INTERVAL = 1000; // 1秒周期
-const SOFT_ALARM_ON = 500; // ON時間0.5秒
+const SOFT_ALARM_INTERVAL = 1000;
+const SOFT_ALARM_ON = 500;
 
 // 強度アラーム
 let faceMissingStart = null;
 let lastHardAlarmTime = 0;
-const HARD_ALARM_INTERVAL = 500; // 0.5秒
+const HARD_ALARM_INTERVAL = 500;
 
 // カメラ切替用
 let currentFacingMode = "user"; // "user" 内カメラ / "environment" 外カメラ
@@ -130,11 +130,11 @@ const faceMesh = new FaceMesh({ locateFile: f=>`https://cdn.jsdelivr.net/npm/@me
 faceMesh.setOptions({ maxNumFaces:1 });
 function dist(a,b){return Math.hypot(a.x-b.x, a.y-b.y);}
 
-// --- カメラ取得・起動 ---
+// --- カメラ起動関数（単一 Camera インスタンス管理） ---
 async function startCamera() {
   try {
     if(cameraInstance){
-      cameraInstance.stop();
+      await cameraInstance.stop();
       cameraInstance = null;
     }
 
@@ -145,16 +145,17 @@ async function startCamera() {
     video.srcObject = stream;
     await video.play();
 
-    // Camera インスタンスを新規作成
-    cameraInstance = new Camera(video,{
-      onFrame: async()=>{ await faceMesh.send({image:video}); },
+    cameraInstance = new Camera(video, {
+      onFrame: async()=>await faceMesh.send({image:video}),
       width:640, height:480
     });
     cameraInstance.start();
-  } catch(err){
-    console.error("カメラ取得失敗:", err);
-  }
+
+  } catch(err){ console.error("カメラ取得失敗:", err); }
 }
+
+// --- 初回カメラ起動 ---
+startCamera();
 
 // --- カメラ切替 ---
 switchCamBtn.onclick = async () => {
@@ -162,15 +163,11 @@ switchCamBtn.onclick = async () => {
   await startCamera();
 };
 
-// 最初のカメラ起動
-startCamera();
-
 // --- 顔検出結果処理 ---
 faceMesh.onResults(res=>{
   if(!isRunning) return;
   const now = performance.now();
 
-  // 強度アラーム: 顔未検出
   if(!res.multiFaceLandmarks || res.multiFaceLandmarks.length===0){
     if(!faceMissingStart) faceMissingStart=now;
     const elapsed=(now-faceMissingStart)/1000;
@@ -182,7 +179,6 @@ faceMesh.onResults(res=>{
     return;
   } else { faceMissingStart=null; }
 
-  // 顔ランドマーク
   const lm=res.multiFaceLandmarks[0];
   const leftEye=lm[33], rightEye=lm[263], nose=lm[1], chin=lm[152];
   const rawYaw=Math.atan2(rightEye.z-leftEye.z, rightEye.x-leftEye.x)*180/Math.PI;
@@ -210,7 +206,6 @@ faceMesh.onResults(res=>{
   areaValue.textContent=areaRatio.toFixed(2);
   eyeValue.textContent=eyeRatio.toFixed(2);
 
-  // 軽度アラーム判定
   let reasons=[];
   const conditions = {
     yaw: Math.abs(yaw)>MAX_YAW,
@@ -223,18 +218,15 @@ faceMesh.onResults(res=>{
   for(let key of alarmKeys){
     if(conditions[key]){
       if(!alertTimers[key]) alertTimers[key]=now;
-      if((now-alertTimers[key])/1000 >= ALARM_DELAY) reasons.push(
-        key==="yaw"?"Yaw角度異常":
-        key==="pitch"?"Pitch角度異常":
-        key==="nose"?"鼻‐顎距離異常":
-        key==="area"?"顔面積異常":"目の可視率異常"
-      );
+      if((now-alertTimers[key])/1000 >= ALARM_DELAY) reasons.push(key==="yaw"?"Yaw角度異常":
+                                                       key==="pitch"?"Pitch角度異常":
+                                                       key==="nose"?"鼻‐顎距離異常":
+                                                       key==="area"?"顔面積異常":"目の可視率異常");
     } else {
       alertTimers[key]=null;
     }
   }
 
-  // 表示と軽度アラーム鳴動
   if(reasons.length>0){
     alertReason.textContent="⚠️ "+reasons.join(" / "); alertReason.className="warning";
     if(!softAlarmActive) playSoft();
