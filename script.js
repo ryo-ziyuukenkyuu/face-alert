@@ -69,7 +69,7 @@ const eyeSlider = document.getElementById("eyeSlider");
 const eyeLimit = document.getElementById("eyeLimit");
 
 const calibBtn = document.getElementById("calibBtn");
-const switchCamBtn = document.getElementById("switchCamBtn"); // 新規追加
+const switchCamBtn = document.getElementById("switchCamBtn");
 
 // --- スライダー連動 ---
 yawSlider.oninput = () => { MAX_YAW = +yawSlider.value; yawLimit.textContent = MAX_YAW; };
@@ -125,32 +125,44 @@ calibBtn.onclick = () => {
   stopAlarms();
 };
 
-// --- カメラ切替 ---
-switchCamBtn.onclick = async () => {
-  currentFacingMode = (currentFacingMode === "user" ? "environment" : "user");
-  if(cameraInstance){ cameraInstance.stop(); video.srcObject = null; }
-  await startCamera();
-};
-
 // --- FaceMesh ---
 const faceMesh = new FaceMesh({ locateFile: f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
 faceMesh.setOptions({ maxNumFaces:1 });
 function dist(a,b){return Math.hypot(a.x-b.x, a.y-b.y);}
 
-// --- カメラ取得（自動露出ON） ---
+// --- カメラ取得・起動 ---
 async function startCamera() {
   try {
+    if(cameraInstance){
+      cameraInstance.stop();
+      cameraInstance = null;
+    }
+
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { width:640, height:480, facingMode: currentFacingMode },
       audio: false
     });
     video.srcObject = stream;
     await video.play();
-    if(cameraInstance) cameraInstance.stop();
-    cameraInstance = new Camera(video,{ onFrame: async()=>await faceMesh.send({image:video}), width:640, height:480 });
+
+    // Camera インスタンスを新規作成
+    cameraInstance = new Camera(video,{
+      onFrame: async()=>{ await faceMesh.send({image:video}); },
+      width:640, height:480
+    });
     cameraInstance.start();
-  } catch(err){ console.error("カメラ取得失敗:", err); }
+  } catch(err){
+    console.error("カメラ取得失敗:", err);
+  }
 }
+
+// --- カメラ切替 ---
+switchCamBtn.onclick = async () => {
+  currentFacingMode = (currentFacingMode === "user") ? "environment" : "user";
+  await startCamera();
+};
+
+// 最初のカメラ起動
 startCamera();
 
 // --- 顔検出結果処理 ---
@@ -211,10 +223,12 @@ faceMesh.onResults(res=>{
   for(let key of alarmKeys){
     if(conditions[key]){
       if(!alertTimers[key]) alertTimers[key]=now;
-      if((now-alertTimers[key])/1000 >= ALARM_DELAY) reasons.push(key==="yaw"?"Yaw角度異常":
-                                                       key==="pitch"?"Pitch角度異常":
-                                                       key==="nose"?"鼻‐顎距離異常":
-                                                       key==="area"?"顔面積異常":"目の可視率異常");
+      if((now-alertTimers[key])/1000 >= ALARM_DELAY) reasons.push(
+        key==="yaw"?"Yaw角度異常":
+        key==="pitch"?"Pitch角度異常":
+        key==="nose"?"鼻‐顎距離異常":
+        key==="area"?"顔面積異常":"目の可視率異常"
+      );
     } else {
       alertTimers[key]=null;
     }
