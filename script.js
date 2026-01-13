@@ -3,6 +3,7 @@ const softAlarm = document.getElementById("softAlarm");
 const hardAlarm = document.getElementById("hardAlarm");
 
 let isRunning = false;
+let stream = null; // 現在の MediaStream
 
 // 閾値
 let MAX_YAW = 80;
@@ -40,14 +41,13 @@ const HARD_ALARM_INTERVAL = 500;
 
 // カメラ切替用
 let currentFacingMode = "user";
-let stream = null;
+let cameraInstance = null;
 
 // UI
 const toggleBtn = document.getElementById("toggleBtn");
 const statusText = document.getElementById("statusText");
 const alertReason = document.getElementById("alertReason");
 const switchCamBtn = document.getElementById("switchCamBtn");
-const calibBtn = document.getElementById("calibBtn");
 
 const yawText = document.getElementById("yawValue");
 const pitchText = document.getElementById("pitchValue");
@@ -70,11 +70,14 @@ const areaLimit = document.getElementById("areaLimit");
 const eyeSlider = document.getElementById("eyeSlider");
 const eyeLimit = document.getElementById("eyeLimit");
 
+const calibBtn = document.getElementById("calibBtn");
+
 // --- ログ用 ---
 const logContainer = document.createElement("div");
 logContainer.style.textAlign = "left";
 logContainer.style.marginTop = "10px";
 document.body.appendChild(logContainer);
+
 let lastCaptureTime = 0;
 
 // --- スライダー連動 ---
@@ -111,13 +114,32 @@ function stopAlarms(){
   lastSoftAlarmTime=0; lastHardAlarmTime=0;
 }
 
-// --- 開始/停止 ---
-toggleBtn.onclick = () => {
+// --- 開始/停止 (iOS対応: ユーザー操作でカメラ開始) ---
+toggleBtn.onclick = async () => {
   isRunning = !isRunning;
+
   if(isRunning){
-    toggleBtn.textContent = "■ 停止"; toggleBtn.className="stop"; statusText.textContent="🟢 作動中";
+    toggleBtn.textContent = "■ 停止"; 
+    toggleBtn.className="stop"; 
+    statusText.textContent="🟢 作動中";
+
+    if(!stream){
+      try{
+        await startCamera();
+      } catch(e){
+        console.error("カメラ開始失敗:", e);
+        isRunning = false;
+        toggleBtn.textContent="▶ 開始";
+        toggleBtn.className="start";
+        statusText.textContent="🔴 停止中";
+        return;
+      }
+    }
+
   } else {
-    toggleBtn.textContent = "▶ 開始"; toggleBtn.className="start"; statusText.textContent="🔴 停止中";
+    toggleBtn.textContent = "▶ 開始"; 
+    toggleBtn.className="start"; 
+    statusText.textContent="🔴 停止中";
     stopAlarms();
   }
 };
@@ -137,10 +159,7 @@ calibBtn.onclick = () => {
 // --- カメラ切替 ---
 switchCamBtn.onclick = async () => {
   currentFacingMode = (currentFacingMode === "user" ? "environment" : "user");
-  if(stream){
-    stream.getTracks().forEach(track => track.stop());
-    video.srcObject = null;
-  }
+  if(cameraInstance){ cameraInstance.stop(); video.srcObject=null; stream=null; }
   await startCamera();
 };
 
@@ -158,28 +177,19 @@ async function startCamera() {
     });
     video.srcObject = stream;
     await video.play();
-    requestAnimationFrame(loopFrame);
+
+    if(cameraInstance) cameraInstance.stop();
+    cameraInstance = new Camera(video,{ onFrame: async()=>await faceMesh.send({image:video}), width:640, height:480 });
+    cameraInstance.start();
   } catch(err){ console.error("カメラ取得失敗:", err); }
 }
 
-// --- 顔検出ループ ---
-async function loopFrame(){
-  if(!isRunning) return requestAnimationFrame(loopFrame);
-  try {
-    await faceMesh.send({image:video});
-  } catch(e){
-    console.error("FaceMesh送信エラー:", e);
-  }
-  requestAnimationFrame(loopFrame);
-}
-
-// --- 顔検出結果処理 ---
+// --- 顔検出処理 ---
 faceMesh.onResults(res=>{
   if(!isRunning) return;
   const now = performance.now();
 
   try{
-    // 顔未検出
     if(!res.multiFaceLandmarks || res.multiFaceLandmarks.length===0){
       if(!faceMissingStart) faceMissingStart=now;
       const elapsed=(now-faceMissingStart)/1000;
@@ -192,7 +202,6 @@ faceMesh.onResults(res=>{
       return;
     } else { faceMissingStart=null; }
 
-    // 顔ランドマーク
     const lm=res.multiFaceLandmarks[0];
     const leftEye=lm[33], rightEye=lm[263], nose=lm[1], chin=lm[152];
     const rawYaw=Math.atan2(rightEye.z-leftEye.z, rightEye.x-leftEye.x)*180/Math.PI;
@@ -282,8 +291,12 @@ function captureLog(duration, force=false, reasonList=[], values={}){
 <br><img src="${imageData}" style="width:160px;">`;
 
     logContainer.prepend(logEntry);
-
   } catch(err){
     console.error("ログキャプチャ失敗:", err);
   }
+}
+
+// --- Camera開始 ---
+if(!cameraInstance){
+  cameraInstance = new Camera(video,{onFrame: async()=>await faceMesh.send({image:video}), width:640, height:480});
 }
