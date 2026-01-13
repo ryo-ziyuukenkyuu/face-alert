@@ -39,7 +39,7 @@ let lastHardAlarmTime = 0;
 const HARD_ALARM_INTERVAL = 500;
 
 // カメラ切替用
-let currentFacingMode = "user";
+let currentFacingMode = "user"; // user=内カメラ, environment=外カメラ
 let cameraInstance = null;
 
 // UI
@@ -133,23 +133,26 @@ const faceMesh = new FaceMesh({ locateFile: f=>`https://cdn.jsdelivr.net/npm/@me
 faceMesh.setOptions({ maxNumFaces:1 });
 function dist(a,b){return Math.hypot(a.x-b.x, a.y-b.y);}
 
-// --- カメラ開始 ---
+// --- カメラ取得 ---
 async function startCamera() {
   try {
-    if(cameraInstance){ 
-      cameraInstance.stop(); 
-      cameraInstance = null; 
+    if(cameraInstance){
+      cameraInstance.stop();
+      cameraInstance = null;
     }
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { width:640, height:480, facingMode: currentFacingMode },
-      audio: false
-    });
+
+    const constraints = { video: { width:640, height:480, facingMode: currentFacingMode }, audio: false };
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
     video.srcObject = stream;
     await video.play();
+
     cameraInstance = new Camera(video, { onFrame: async()=>await faceMesh.send({image:video}), width:640, height:480 });
     cameraInstance.start();
   } catch(err){ console.error("カメラ取得失敗:", err); }
 }
+
+// 初期カメラ開始
 startCamera();
 
 // --- カメラ切替 ---
@@ -161,12 +164,11 @@ switchCamBtn.onclick = async () => {
 // --- 顔検出結果処理 ---
 faceMesh.onResults(res=>{
   if(!isRunning) return;
-  const now = performance.now();
 
   // 顔未検出
   if(!res.multiFaceLandmarks || res.multiFaceLandmarks.length===0){
-    if(!faceMissingStart) faceMissingStart=now;
-    const elapsed=(now-faceMissingStart)/1000;
+    if(!faceMissingStart) faceMissingStart=performance.now();
+    const elapsed=(performance.now()-faceMissingStart)/1000;
     if(elapsed>=FACE_MISSING_DELAY){
       alertReason.textContent="🚨 顔が見えない（危険）"; alertReason.className="danger"; playHard();
     } else {
@@ -214,8 +216,8 @@ faceMesh.onResults(res=>{
 
   for(let key of alarmKeys){
     if(conditions[key]){
-      if(!alertTimers[key]) alertTimers[key]=now;
-      if((now-alertTimers[key])/1000 >= ALARM_DELAY) reasons.push(key==="yaw"?"Yaw角度異常":
+      if(!alertTimers[key]) alertTimers[key]=performance.now();
+      if((performance.now()-alertTimers[key])/1000 >= ALARM_DELAY) reasons.push(key==="yaw"?"Yaw角度異常":
                                                        key==="pitch"?"Pitch角度異常":
                                                        key==="nose"?"鼻‐顎距離異常":
                                                        key==="area"?"顔面積異常":"目の可視率異常");
@@ -230,6 +232,6 @@ faceMesh.onResults(res=>{
   }
 });
 
-// --- Camera 初期化 ---
+// --- Camera初期化（再確認用） ---
 cameraInstance = new Camera(video, { onFrame: async()=>await faceMesh.send({image:video}), width:640, height:480 });
 cameraInstance.start();
