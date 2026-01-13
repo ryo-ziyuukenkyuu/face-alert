@@ -7,7 +7,7 @@ let isRunning = false;
 // 閾値
 let MAX_YAW = 80;
 let MAX_PITCH_DEG = 25;
-let ALARM_DELAY = 0; // 即座に軽度アラーム判定
+let ALARM_DELAY = 0;
 let FACE_MISSING_DELAY = 3.0;
 let NOSE_CHIN_RATIO_THRESHOLD = 0.55;
 let FACE_AREA_RATIO_THRESHOLD = 0.6;
@@ -25,21 +25,21 @@ let baseNoseChin = null;
 let baseFaceArea = null;
 let baseEyeDist = null;
 
-// 軽度アラーム独立管理
+// 軽度アラーム
 const alarmKeys = ["yaw","pitch","nose","area","eye"];
 let alertTimers = {};
 let softAlarmActive = false;
 let lastSoftAlarmTime = 0;
-const SOFT_ALARM_INTERVAL = 1000; // 1秒周期
-const SOFT_ALARM_ON = 500; // ON時間0.5秒
+const SOFT_ALARM_INTERVAL = 1000;
+const SOFT_ALARM_ON = 500;
 
 // 強度アラーム
 let faceMissingStart = null;
 let lastHardAlarmTime = 0;
-const HARD_ALARM_INTERVAL = 500; // 0.5秒
+const HARD_ALARM_INTERVAL = 500;
 
-// カメラ切替用
-let currentFacingMode = "user"; // "user" 内カメラ / "environment" 外カメラ
+// カメラ
+let currentFacingMode = "user";
 let currentStream = null;
 
 // UI
@@ -71,7 +71,7 @@ const eyeLimit = document.getElementById("eyeLimit");
 const calibBtn = document.getElementById("calibBtn");
 const switchCamBtn = document.getElementById("switchCamBtn");
 
-// --- スライダー連動 ---
+// --- スライダー ---
 yawSlider.oninput = () => { MAX_YAW = +yawSlider.value; yawLimit.textContent = MAX_YAW; };
 pitchSlider.oninput = () => { MAX_PITCH_DEG = +pitchSlider.value; pitchLimit.textContent = MAX_PITCH_DEG; };
 timeSlider.oninput = () => { ALARM_DELAY = +timeSlider.value; timeLimit.textContent = ALARM_DELAY.toFixed(1); };
@@ -80,38 +80,54 @@ noseSlider.oninput = () => { NOSE_CHIN_RATIO_THRESHOLD = +noseSlider.value; nose
 areaSlider.oninput = () => { FACE_AREA_RATIO_THRESHOLD = +areaSlider.value; areaLimit.textContent = FACE_AREA_RATIO_THRESHOLD.toFixed(2); };
 eyeSlider.oninput = () => { EYE_VISIBILITY_THRESHOLD = +eyeSlider.value; eyeLimit.textContent = EYE_VISIBILITY_THRESHOLD.toFixed(2); };
 
-// --- アラーム制御 ---
+// --- アラーム ---
 function playSoft(){
   const now = performance.now();
   if(now - lastSoftAlarmTime >= SOFT_ALARM_INTERVAL){
     softAlarmActive = true;
     softAlarm.currentTime = 0;
-    softAlarm.play();
+    softAlarm.play().catch(()=>{});
     lastSoftAlarmTime = now;
-    setTimeout(()=>{ softAlarm.pause(); softAlarm.currentTime=0; softAlarmActive=false; }, SOFT_ALARM_ON);
+    setTimeout(()=>{
+      softAlarm.pause();
+      softAlarm.currentTime = 0;
+      softAlarmActive = false;
+    }, SOFT_ALARM_ON);
   }
 }
+
 function playHard(){
   const now = performance.now();
   if(now - lastHardAlarmTime >= HARD_ALARM_INTERVAL){
     hardAlarm.currentTime = 0;
-    hardAlarm.play();
+    hardAlarm.play().catch(()=>{});
     lastHardAlarmTime = now;
   }
 }
+
 function stopAlarms(){
   softAlarm.pause(); softAlarm.currentTime=0; softAlarmActive=false;
   hardAlarm.pause(); hardAlarm.currentTime=0;
-  lastSoftAlarmTime=0; lastHardAlarmTime=0;
 }
 
 // --- 開始/停止 ---
 toggleBtn.onclick = () => {
   isRunning = !isRunning;
   if(isRunning){
-    toggleBtn.textContent = "■ 停止"; toggleBtn.className="stop"; statusText.textContent="🟢 作動中";
+    hardAlarm.muted = true;
+    hardAlarm.play().then(()=>{
+      hardAlarm.pause();
+      hardAlarm.currentTime = 0;
+      hardAlarm.muted = false;
+    }).catch(()=>{});
+
+    toggleBtn.textContent = "■ 停止";
+    toggleBtn.className="stop";
+    statusText.textContent="🟢 作動中";
   } else {
-    toggleBtn.textContent = "▶ 開始"; toggleBtn.className="start"; statusText.textContent="🔴 停止中";
+    toggleBtn.textContent = "▶ 開始";
+    toggleBtn.className="start";
+    statusText.textContent="🔴 停止中";
     stopAlarms();
   }
 };
@@ -130,52 +146,50 @@ const faceMesh = new FaceMesh({ locateFile: f=>`https://cdn.jsdelivr.net/npm/@me
 faceMesh.setOptions({ maxNumFaces:1 });
 function dist(a,b){return Math.hypot(a.x-b.x, a.y-b.y);}
 
-// --- カメラ起動 ---
+// --- カメラ ---
 async function startCamera(){
-  try {
-    if(currentStream){
-      currentStream.getTracks().forEach(track => track.stop());
-    }
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { width:640, height:480, facingMode: currentFacingMode },
-      audio: false
-    });
-    currentStream = stream;
-    video.srcObject = stream;
-    await video.play();
-  } catch(err){ console.error("カメラ取得失敗:", err); }
+  if(currentStream) currentStream.getTracks().forEach(t=>t.stop());
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video:{width:640,height:480,facingMode:currentFacingMode},
+    audio:false
+  });
+  currentStream = stream;
+  video.srcObject = stream;
+  await video.play();
 }
 
-// --- カメラ切替 ---
 switchCamBtn.onclick = async () => {
-  currentFacingMode = (currentFacingMode === "user" ? "environment" : "user");
+  currentFacingMode = currentFacingMode==="user"?"environment":"user";
   await startCamera();
 };
 
-// --- 顔検出ループ ---
+// --- 検出ループ ---
 async function faceDetectionLoop(){
-  if(isRunning){
-    await faceMesh.send({image: video});
-  }
+  if(isRunning) await faceMesh.send({image: video});
   requestAnimationFrame(faceDetectionLoop);
 }
 startCamera().then(()=>faceDetectionLoop());
 
-// --- 顔検出結果処理 ---
+// --- 結果処理 ---
 faceMesh.onResults(res=>{
   if(!isRunning) return;
   const now = performance.now();
 
+  // 顔未検出
   if(!res.multiFaceLandmarks || res.multiFaceLandmarks.length===0){
-    if(!faceMissingStart) faceMissingStart=now;
-    const elapsed=(now-faceMissingStart)/1000;
-    if(elapsed>=FACE_MISSING_DELAY){
-      alertReason.textContent="🚨 顔が見えない（危険）"; alertReason.className="danger"; playHard();
-    } else {
-      alertReason.textContent="⚠️ 顔未検出（待機中）"; alertReason.className="warning"; 
+    if(!faceMissingStart) faceMissingStart = now;
+
+    if((now-faceMissingStart)/1000 >= FACE_MISSING_DELAY){
+      alertReason.textContent="🚨 顔が見えない（危険）";
+      alertReason.className="danger";
+      playHard();
     }
     return;
-  } else { faceMissingStart=null; }
+  }
+
+  // ← 顔が戻ったら完全復帰
+  faceMissingStart = null;
+  lastHardAlarmTime = 0;
 
   const lm=res.multiFaceLandmarks[0];
   const leftEye=lm[33], rightEye=lm[263], nose=lm[1], chin=lm[152];
@@ -216,19 +230,20 @@ faceMesh.onResults(res=>{
   for(let key of alarmKeys){
     if(conditions[key]){
       if(!alertTimers[key]) alertTimers[key]=now;
-      if((now-alertTimers[key])/1000 >= ALARM_DELAY) reasons.push(key==="yaw"?"Yaw角度異常":
-                                                       key==="pitch"?"Pitch角度異常":
-                                                       key==="nose"?"鼻‐顎距離異常":
-                                                       key==="area"?"顔面積異常":"目の可視率異常");
+      if((now-alertTimers[key])/1000 >= ALARM_DELAY){
+        reasons.push(key);
+      }
     } else {
-      alertTimers[key]=null;
+      delete alertTimers[key]; // ← 重要
     }
   }
 
-  if(reasons.length>0){
-    alertReason.textContent="⚠️ "+reasons.join(" / "); alertReason.className="warning";
-    if(!softAlarmActive) playSoft();
+  if(reasons.length){
+    alertReason.textContent="⚠️ 姿勢異常";
+    alertReason.className="warning";
+    playSoft();
   } else {
-    alertReason.textContent="異常なし"; alertReason.className="safe";
+    alertReason.textContent="異常なし";
+    alertReason.className="safe";
   }
 });
