@@ -7,7 +7,7 @@ let isRunning = false;
 // 閾値
 let MAX_YAW = 80;
 let MAX_PITCH_DEG = 25;
-let ALARM_DELAY = 0;
+let ALARM_DELAY = 0; 
 let FACE_MISSING_DELAY = 3.0;
 let NOSE_CHIN_RATIO_THRESHOLD = 0.55;
 let FACE_AREA_RATIO_THRESHOLD = 0.6;
@@ -25,7 +25,7 @@ let baseNoseChin = null;
 let baseFaceArea = null;
 let baseEyeDist = null;
 
-// 軽度アラーム
+// 軽度アラーム管理
 const alarmKeys = ["yaw","pitch","nose","area","eye"];
 let alertTimers = {};
 let softAlarmActive = false;
@@ -38,9 +38,8 @@ let faceMissingStart = null;
 let lastHardAlarmTime = 0;
 const HARD_ALARM_INTERVAL = 500;
 
-// カメラ切替用
-let currentFacingMode = "user";
-let cameraInstance = null;
+// カメラ切替
+let currentFacingMode = "user"; // user:内カメ / environment:外カメ
 let currentStream = null;
 
 // UI
@@ -134,32 +133,24 @@ function dist(a,b){return Math.hypot(a.x-b.x, a.y-b.y);}
 // --- カメラ起動 ---
 async function startCamera() {
   try {
-    // 古いストリーム停止
     if(currentStream){
-      currentStream.getTracks().forEach(track => track.stop());
-      currentStream = null;
+      currentStream.getTracks().forEach(track=>track.stop());
     }
-    if(cameraInstance){
-      cameraInstance.stop();
-      cameraInstance = null;
-    }
-
-    // 新しいストリーム取得
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { width:640, height:480, facingMode: currentFacingMode },
       audio: false
     });
-    currentStream = stream;
     video.srcObject = stream;
-    await video.play();
+    currentStream = stream;
 
-    // Camera インスタンス作成
-    cameraInstance = new Camera(video,{ onFrame: async()=>await faceMesh.send({image:video}), width:640, height:480 });
-    cameraInstance.start();
+    // requestAnimationFrame でループ
+    async function onFrame(){
+      if(video.readyState>=2) await faceMesh.send({image: video});
+      requestAnimationFrame(onFrame);
+    }
+    onFrame();
 
-  } catch(err){
-    console.error("カメラ取得失敗:", err);
-  }
+  } catch(err){ console.error("カメラ取得失敗:", err); }
 }
 startCamera();
 
@@ -169,22 +160,24 @@ switchCamBtn.onclick = async () => {
   await startCamera();
 };
 
-// --- 顔検出処理 ---
+// --- 顔検出結果処理 ---
 faceMesh.onResults(res=>{
   if(!isRunning) return;
   const now = performance.now();
 
+  // 顔未検出
   if(!res.multiFaceLandmarks || res.multiFaceLandmarks.length===0){
     if(!faceMissingStart) faceMissingStart=now;
     const elapsed=(now-faceMissingStart)/1000;
     if(elapsed>=FACE_MISSING_DELAY){
       alertReason.textContent="🚨 顔が見えない（危険）"; alertReason.className="danger"; playHard();
     } else {
-      alertReason.textContent="⚠️ 顔未検出（待機中）"; alertReason.className="warning"; 
+      alertReason.textContent="⚠️ 顔未検出（待機中）"; alertReason.className="warning";
     }
     return;
   } else { faceMissingStart=null; }
 
+  // 顔ランドマーク
   const lm=res.multiFaceLandmarks[0];
   const leftEye=lm[33], rightEye=lm[263], nose=lm[1], chin=lm[152];
   const rawYaw=Math.atan2(rightEye.z-leftEye.z, rightEye.x-leftEye.x)*180/Math.PI;
@@ -225,14 +218,11 @@ faceMesh.onResults(res=>{
   for(let key of alarmKeys){
     if(conditions[key]){
       if(!alertTimers[key]) alertTimers[key]=now;
-      if((now-alertTimers[key])/1000 >= ALARM_DELAY)
-        reasons.push(key==="yaw"?"Yaw角度異常":
-                     key==="pitch"?"Pitch角度異常":
-                     key==="nose"?"鼻‐顎距離異常":
-                     key==="area"?"顔面積異常":"目の可視率異常");
-    } else {
-      alertTimers[key]=null;
-    }
+      if((now-alertTimers[key])/1000 >= ALARM_DELAY) reasons.push(key==="yaw"?"Yaw角度異常":
+                                                       key==="pitch"?"Pitch角度異常":
+                                                       key==="nose"?"鼻‐顎距離異常":
+                                                       key==="area"?"顔面積異常":"目の可視率異常");
+    } else { alertTimers[key]=null; }
   }
 
   if(reasons.length>0){
