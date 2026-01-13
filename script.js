@@ -40,7 +40,7 @@ const HARD_ALARM_INTERVAL = 500;
 
 // カメラ切替用
 let currentFacingMode = "user";
-let videoStream = null;
+let stream = null;
 
 // UI
 const toggleBtn = document.getElementById("toggleBtn");
@@ -137,6 +137,10 @@ calibBtn.onclick = () => {
 // --- カメラ切替 ---
 switchCamBtn.onclick = async () => {
   currentFacingMode = (currentFacingMode === "user" ? "environment" : "user");
+  if(stream){
+    stream.getTracks().forEach(track => track.stop());
+    video.srcObject = null;
+  }
   await startCamera();
 };
 
@@ -148,18 +152,25 @@ function dist(a,b){return Math.hypot(a.x-b.x, a.y-b.y);}
 // --- カメラ取得 ---
 async function startCamera() {
   try {
-    if(videoStream){
-      videoStream.getTracks().forEach(track=>track.stop());
-    }
-    videoStream = await navigator.mediaDevices.getUserMedia({
-      video:{ width:640, height:480, facingMode:currentFacingMode },
-      audio:false
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { width:640, height:480, facingMode: currentFacingMode },
+      audio: false
     });
-    video.srcObject = videoStream;
+    video.srcObject = stream;
     await video.play();
-  } catch(err){
-    console.error("カメラ取得失敗:", err);
+    requestAnimationFrame(loopFrame);
+  } catch(err){ console.error("カメラ取得失敗:", err); }
+}
+
+// --- 顔検出ループ ---
+async function loopFrame(){
+  if(!isRunning) return requestAnimationFrame(loopFrame);
+  try {
+    await faceMesh.send({image:video});
+  } catch(e){
+    console.error("FaceMesh送信エラー:", e);
   }
+  requestAnimationFrame(loopFrame);
 }
 
 // --- 顔検出結果処理 ---
@@ -174,7 +185,7 @@ faceMesh.onResults(res=>{
       const elapsed=(now-faceMissingStart)/1000;
       if(elapsed>=FACE_MISSING_DELAY){
         alertReason.textContent="🚨 顔が見えない（危険）"; alertReason.className="danger"; playHard();
-        captureLog(elapsed,true);
+        captureLog(elapsed, true);
       } else {
         alertReason.textContent="⚠️ 顔未検出（待機中）"; alertReason.className="warning"; 
       }
@@ -234,33 +245,33 @@ faceMesh.onResults(res=>{
     if(reasons.length>0){
       alertReason.textContent="⚠️ "+reasons.join(" / "); alertReason.className="warning";
       playSoft();
-      captureLog(ALARM_DELAY,false,reasons,{yaw,pitch:pitchAdj,noseRatio,areaRatio,eyeRatio});
+      captureLog(ALARM_DELAY, false, reasons, {yaw,pitch:pitchAdj,noseRatio,areaRatio,eyeRatio});
     } else {
       alertReason.textContent="異常なし"; alertReason.className="safe";
     }
 
   } catch(err){
-    console.error("処理エラー:",err);
+    console.error("処理エラー:", err);
   }
 });
 
 // --- ログキャプチャ ---
 function captureLog(duration, force=false, reasonList=[], values={}){
   const now = performance.now();
-  if(!force && now-lastCaptureTime<3000) return;
-  lastCaptureTime=now;
+  if(!force && now - lastCaptureTime < 3000) return;
+  lastCaptureTime = now;
 
-  if(video.videoWidth===0 || video.videoHeight===0) return;
+  if(video.videoWidth === 0 || video.videoHeight === 0) return;
 
   try{
-    const canvas=document.createElement("canvas");
-    canvas.width=video.videoWidth;
-    canvas.height=video.videoHeight;
-    const ctx=canvas.getContext("2d");
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
     ctx.drawImage(video,0,0,canvas.width,canvas.height);
-    const imageData=canvas.toDataURL("image/png");
+    const imageData = canvas.toDataURL("image/png");
 
-    const logEntry=document.createElement("div");
+    const logEntry = document.createElement("div");
     logEntry.style.borderTop="1px solid #888";
     logEntry.style.padding="4px";
     logEntry.innerHTML = `<strong>${new Date().toLocaleTimeString()}</strong> - ${force ? "顔未検出" : reasonList.join(" / ")}
