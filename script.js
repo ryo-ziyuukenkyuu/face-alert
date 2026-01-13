@@ -47,7 +47,6 @@ const toggleBtn = document.getElementById("toggleBtn");
 const statusText = document.getElementById("statusText");
 const alertReason = document.getElementById("alertReason");
 const switchCamBtn = document.getElementById("switchCamBtn");
-const calibBtn = document.getElementById("calibBtn");
 
 const yawText = document.getElementById("yawValue");
 const pitchText = document.getElementById("pitchValue");
@@ -69,6 +68,15 @@ const areaSlider = document.getElementById("areaSlider");
 const areaLimit = document.getElementById("areaLimit");
 const eyeSlider = document.getElementById("eyeSlider");
 const eyeLimit = document.getElementById("eyeLimit");
+
+const calibBtn = document.getElementById("calibBtn");
+
+// --- ログ用 ---
+const logContainer = document.createElement("div");
+logContainer.style.textAlign = "left";
+logContainer.style.marginTop = "10px";
+document.body.appendChild(logContainer);
+let lastCaptureTime = 0;
 
 // --- スライダー連動 ---
 yawSlider.oninput = () => { MAX_YAW = +yawSlider.value; yawLimit.textContent = MAX_YAW; };
@@ -109,7 +117,12 @@ toggleBtn.onclick = async () => {
   isRunning = !isRunning;
   if(isRunning){
     toggleBtn.textContent = "■ 停止"; toggleBtn.className="stop"; statusText.textContent="🟢 作動中";
-    await startCamera(); // 開始ボタンで必ず camera 起動
+
+    // 音声アンロック（iOS / GitHub Pages 対策）
+    softAlarm.currentTime=0; softAlarm.play().then(()=>softAlarm.pause());
+    hardAlarm.currentTime=0; hardAlarm.play().then(()=>hardAlarm.pause());
+
+    await startCamera();
   } else {
     toggleBtn.textContent = "▶ 開始"; toggleBtn.className="start"; statusText.textContent="🔴 停止中";
     stopAlarms();
@@ -131,7 +144,7 @@ calibBtn.onclick = () => {
 // --- カメラ切替 ---
 switchCamBtn.onclick = async () => {
   currentFacingMode = (currentFacingMode === "user" ? "environment" : "user");
-  if(cameraInstance){ cameraInstance.stop(); video.srcObject=null; cameraInstance=null; }
+  if(cameraInstance){ cameraInstance.stop(); video.srcObject=null; }
   await startCamera();
 };
 
@@ -143,18 +156,13 @@ function dist(a,b){return Math.hypot(a.x-b.x, a.y-b.y);}
 // --- カメラ取得 ---
 async function startCamera() {
   try {
-    if(cameraInstance){ cameraInstance.stop(); video.srcObject=null; cameraInstance=null; }
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { width:640, height:480, facingMode: currentFacingMode },
       audio: false
     });
     video.srcObject = stream;
     await video.play();
-    // video のサイズ確定まで待機（iOS 対策）
-    await new Promise(resolve => {
-      if(video.videoWidth>0) resolve();
-      else video.onloadedmetadata=()=>resolve();
-    });
+    if(cameraInstance) cameraInstance.stop();
     cameraInstance = new Camera(video,{ onFrame: async()=>await faceMesh.send({image:video}), width:640, height:480 });
     cameraInstance.start();
   } catch(err){ console.error("カメラ取得失敗:", err); }
@@ -172,6 +180,7 @@ faceMesh.onResults(res=>{
       const elapsed=(now-faceMissingStart)/1000;
       if(elapsed>=FACE_MISSING_DELAY){
         alertReason.textContent="🚨 顔が見えない（危険）"; alertReason.className="danger"; playHard();
+        captureLog(elapsed, true);
       } else {
         alertReason.textContent="⚠️ 顔未検出（待機中）"; alertReason.className="warning"; 
       }
@@ -205,6 +214,7 @@ faceMesh.onResults(res=>{
     areaValue.textContent=areaRatio.toFixed(2);
     eyeValue.textContent=eyeRatio.toFixed(2);
 
+    // 軽度アラーム判定
     let reasons=[];
     const conditions = {
       yaw: Math.abs(yaw)>MAX_YAW,
@@ -217,18 +227,19 @@ faceMesh.onResults(res=>{
     for(let key of alarmKeys){
       if(conditions[key]){
         if(!alertTimers[key]) alertTimers[key]=now;
-        if((now-alertTimers[key])/1000 >= ALARM_DELAY) reasons.push(
-          key==="yaw"?"Yaw角度異常":
-          key==="pitch"?"Pitch角度異常":
-          key==="nose"?"鼻‐顎距離異常":
-          key==="area"?"顔面積異常":"目の可視率異常"
-        );
-      } else alertTimers[key]=null;
+        if((now-alertTimers[key])/1000 >= ALARM_DELAY) reasons.push(key==="yaw"?"Yaw角度異常":
+                                                         key==="pitch"?"Pitch角度異常":
+                                                         key==="nose"?"鼻‐顎距離異常":
+                                                         key==="area"?"顔面積異常":"目の可視率異常");
+      } else {
+        alertTimers[key]=null;
+      }
     }
 
     if(reasons.length>0){
       alertReason.textContent="⚠️ "+reasons.join(" / "); alertReason.className="warning";
       playSoft();
+      captureLog(ALARM_DELAY, false, reasons, {yaw,pitch:pitchAdj,noseRatio,areaRatio,eyeRatio});
     } else {
       alertReason.textContent="異常なし"; alertReason.className="safe";
     }
@@ -238,6 +249,41 @@ faceMesh.onResults(res=>{
   }
 });
 
+// --- ログキャプチャ ---
+function captureLog(duration, force=false, reasonList=[], values={}){
+  if(!isRunning) return;
+  const now = performance.now();
+  if(!force && now - lastCaptureTime < 3000) return; // 3秒ごと
+  lastCaptureTime = now;
+
+  if(video.videoWidth===0 || video.videoHeight===0){
+    requestAnimationFrame(()=>captureLog(duration, force, reasonList, values));
+    return;
+  }
+
+  try{
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video,0,0,canvas.width,canvas.height);
+    const imageData = canvas.toDataURL("image/png");
+
+    const logEntry = document.createElement("div");
+    logEntry.style.borderTop="1px solid #888";
+    logEntry.style.padding="4px";
+    logEntry.innerHTML = `<strong>${new Date().toLocaleTimeString()}</strong> - ${force ? "顔未検出" : reasonList.join(" / ")}
+<br>継続秒数: ${duration.toFixed(1)}
+<br>Yaw: ${values.yaw?.toFixed(1)||latestYaw.toFixed(1)}, Pitch: ${values.pitch?.toFixed(1)||latestPitch.toFixed(1)}
+<br>Nose: ${values.noseRatio?.toFixed(2)||noseValue.textContent}, Area: ${values.areaRatio?.toFixed(2)||areaValue.textContent}, Eye: ${values.eyeRatio?.toFixed(2)||eyeValue.textContent}
+<br>設定値 Yaw:${MAX_YAW}, Pitch:${MAX_PITCH_DEG}, Nose:${NOSE_CHIN_RATIO_THRESHOLD}, Area:${FACE_AREA_RATIO_THRESHOLD}, Eye:${EYE_VISIBILITY_THRESHOLD}, ALARM_DELAY:${ALARM_DELAY}, FACE_MISSING_DELAY:${FACE_MISSING_DELAY}
+<br><img src="${imageData}" style="width:160px;">`;
+    logContainer.prepend(logEntry);
+  } catch(err){
+    console.error("ログキャプチャ失敗:", err);
+  }
+}
+
 // --- Camera開始 ---
-cameraInstance = new Camera(video,{ onFrame: async()=>await faceMesh.send({image:video}), width:640, height:480 });
-cameraInstance.start();
+const camera = new Camera(video,{onFrame: async()=>await faceMesh.send({image:video})});
+camera.start();
