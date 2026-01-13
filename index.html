@@ -8,82 +8,28 @@
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
-<style>
-  body {
-    font-family: sans-serif;
-    background: #111;
-    color: #fff;
-    text-align: center;
-  }
-
-  video {
-    width: 100%;
-    max-width: 420px;
-    transform: scaleX(-1);
-  }
-
-  .panel {
-    margin-top: 10px;
-    padding: 10px;
-    background: #222;
-    border-radius: 8px;
-  }
-
-  .alert-panel {
-    background: #300;
-    color: #ff8080;
-    font-weight: bold;
-  }
-
-  button {
-    padding: 10px 20px;
-    font-size: 18px;
-    border-radius: 8px;
-    border: none;
-    font-weight: bold;
-    margin-top: 5px;
-  }
-
-  button.start {
-    background: #2ecc71;
-    color: #000;
-  }
-
-  button.stop {
-    background: #e74c3c;
-    color: #000;
-  }
-
-  label {
-    display: block;
-    margin-top: 10px;
-  }
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<!-- 1. 題名 -->
-<h2>Face Alert 5.0.0</h2>
+<h2>Face Alert 5.1.0</h2>
 
-<!-- 2. カメラ画面 -->
 <video id="video" autoplay muted playsinline></video>
 
-<!-- 3. 開始/停止ボタン -->
-<div>
+<!-- ボタン横並び -->
+<div id="buttonContainer">
   <button id="toggleBtn" class="start">▶ 開始</button>
-  <div id="statusText">🔴 停止中</div>
-  <!-- 追加: 外カメラ切替ボタン -->
+  <button id="calibBtn">キャリブ</button>
   <button id="switchCamBtn">📷 カメラ切替</button>
+  <div id="statusText">🔴 停止中</div>
 </div>
 
-<!-- 4. 異常表示 -->
 <div class="alert-panel">
   <div id="alertReason" class="safe">異常なし</div>
 </div>
 
 <hr>
 
-<!-- 6. 現在値 -->
 <div id="currentValues">
   <div>Yaw：<span id="yawValue">0</span>°</div>
   <div>Pitch：<span id="pitchValue">0</span>°</div>
@@ -94,7 +40,6 @@
 
 <hr>
 
-<!-- 8. 設定値 -->
 <div id="settingsValues">
   <label>Yaw許容角度
     <input type="range" id="yawSlider" min="30" max="120" step="5" value="80">
@@ -136,12 +81,7 @@
   </label>
 </div>
 
-<!-- 9. 0点キャリブレーションボタン -->
-<div>
-  <button id="calibBtn">🎯 0点キャリブレーション</button>
-</div>
-
-<!-- 10. アラーム音 -->
+<!-- アラーム音 -->
 <audio id="softAlarm">
   <source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg">
 </audio>
@@ -150,7 +90,6 @@
   <source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg">
 </audio>
 
-<!-- 11. スクリプト -->
 <script src="script.js"></script>
 </body>
 </html>

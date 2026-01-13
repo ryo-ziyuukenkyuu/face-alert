@@ -30,19 +30,20 @@ button {
   border-radius: 8px;
   border: none;
   font-weight: bold;
+  margin-top: 5px;
 }
 
-button.start {
-  background: #2ecc71;
-  color: #000;
-}
+button.start { background: #2ecc71; color: #000; }
+button.stop { background: #e74c3c; color: #000; }
 
-button.stop {
-  background: #e74c3c;
-  color: #000;
-}
+label { display: block; margin-top: 10px; }
 
-label {
-  display: block;
-  margin-top: 10px;
+/* ボタン横並び */
+#buttonContainer {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 5px;
 }

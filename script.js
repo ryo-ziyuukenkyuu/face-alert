@@ -38,15 +38,16 @@ let faceMissingStart = null;
 let lastHardAlarmTime = 0;
 const HARD_ALARM_INTERVAL = 500;
 
-// カメラ切替用
+// カメラ切替
 let currentFacingMode = "user";
 let cameraInstance = null;
 
 // UI
 const toggleBtn = document.getElementById("toggleBtn");
+const calibBtn = document.getElementById("calibBtn");
+const switchCamBtn = document.getElementById("switchCamBtn");
 const statusText = document.getElementById("statusText");
 const alertReason = document.getElementById("alertReason");
-const switchCamBtn = document.getElementById("switchCamBtn");
 
 const yawText = document.getElementById("yawValue");
 const pitchText = document.getElementById("pitchValue");
@@ -68,8 +69,6 @@ const areaSlider = document.getElementById("areaSlider");
 const areaLimit = document.getElementById("areaLimit");
 const eyeSlider = document.getElementById("eyeSlider");
 const eyeLimit = document.getElementById("eyeLimit");
-
-const calibBtn = document.getElementById("calibBtn");
 
 // --- ログ用 ---
 const logContainer = document.createElement("div");
@@ -125,9 +124,15 @@ toggleBtn.onclick = () => {
 };
 
 // --- キャリブ ---
+// 角度＋各比率初期化
 calibBtn.onclick = () => {
   yawZeroOffset = latestYaw;
   pitchZeroOffset = latestPitch;
+
+  baseNoseChin = null;
+  baseFaceArea = null;
+  baseEyeDist = null;
+
   alertTimers = {};
   faceMissingStart = null;
   stopAlarms();
@@ -135,7 +140,7 @@ calibBtn.onclick = () => {
 
 // --- カメラ切替 ---
 switchCamBtn.onclick = async () => {
-  currentFacingMode = (currentFacingMode === "user" ? "environment" : "user");
+  currentFacingMode = (currentFacingMode==="user"?"environment":"user");
   if(cameraInstance){ cameraInstance.stop(); video.srcObject=null; }
   await startCamera();
 };
@@ -165,7 +170,6 @@ startCamera();
 faceMesh.onResults(res=>{
   if(!isRunning) return;
   const now = performance.now();
-
   try{
     // 顔未検出
     if(!res.multiFaceLandmarks || res.multiFaceLandmarks.length===0){
@@ -173,9 +177,9 @@ faceMesh.onResults(res=>{
       const elapsed=(now-faceMissingStart)/1000;
       if(elapsed>=FACE_MISSING_DELAY){
         alertReason.textContent="🚨 顔が見えない（危険）"; alertReason.className="danger"; playHard();
-        captureLog(elapsed, true);
+        captureLog(elapsed,true);
       } else {
-        alertReason.textContent="⚠️ 顔未検出（待機中）"; alertReason.className="warning"; 
+        alertReason.textContent="⚠️ 顔未検出（待機中）"; alertReason.className="warning";
       }
       return;
     } else { faceMissingStart=null; }
@@ -221,19 +225,18 @@ faceMesh.onResults(res=>{
     for(let key of alarmKeys){
       if(conditions[key]){
         if(!alertTimers[key]) alertTimers[key]=now;
-        if((now-alertTimers[key])/1000 >= ALARM_DELAY) reasons.push(key==="yaw"?"Yaw角度異常":
-                                                         key==="pitch"?"Pitch角度異常":
-                                                         key==="nose"?"鼻‐顎距離異常":
-                                                         key==="area"?"顔面積異常":"目の可視率異常");
-      } else {
-        alertTimers[key]=null;
-      }
+        if((now-alertTimers[key])/1000 >= ALARM_DELAY)
+          reasons.push(key==="yaw"?"Yaw角度異常":
+                       key==="pitch"?"Pitch角度異常":
+                       key==="nose"?"鼻‐顎距離異常":
+                       key==="area"?"顔面積異常":"目の可視率異常");
+      } else { alertTimers[key]=null; }
     }
 
     if(reasons.length>0){
       alertReason.textContent="⚠️ "+reasons.join(" / "); alertReason.className="warning";
       playSoft();
-      captureLog(ALARM_DELAY, false, reasons, {yaw,pitch:pitchAdj,noseRatio,areaRatio,eyeRatio});
+      captureLog(ALARM_DELAY,false,reasons,{yaw,pitch:pitchAdj,noseRatio,areaRatio,eyeRatio});
     } else {
       alertReason.textContent="異常なし"; alertReason.className="safe";
     }
@@ -244,22 +247,22 @@ faceMesh.onResults(res=>{
 });
 
 // --- ログキャプチャ ---
-function captureLog(duration, force=false, reasonList=[], values={}){
+function captureLog(duration,force=false,reasonList=[],values={}){
   const now = performance.now();
-  if(!force && now - lastCaptureTime < 3000) return; // 3秒ごと
+  if(!force && now - lastCaptureTime < 3000) return;
   lastCaptureTime = now;
 
-  if(video.videoWidth === 0 || video.videoHeight === 0) return;
+  if(video.videoWidth ===0 || video.videoHeight===0) return;
 
   try{
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext("2d");
+    const canvas=document.createElement("canvas");
+    canvas.width=video.videoWidth;
+    canvas.height=video.videoHeight;
+    const ctx=canvas.getContext("2d");
     ctx.drawImage(video,0,0,canvas.width,canvas.height);
-    const imageData = canvas.toDataURL("image/png");
+    const imageData=canvas.toDataURL("image/png");
 
-    const logEntry = document.createElement("div");
+    const logEntry=document.createElement("div");
     logEntry.style.borderTop="1px solid #888";
     logEntry.style.padding="4px";
     logEntry.innerHTML = `<strong>${new Date().toLocaleTimeString()}</strong> - ${force ? "顔未検出" : reasonList.join(" / ")}
@@ -272,7 +275,7 @@ function captureLog(duration, force=false, reasonList=[], values={}){
     logContainer.prepend(logEntry);
 
   } catch(err){
-    console.error("ログキャプチャ失敗:", err);
+    console.error("ログキャプチャ失敗:",err);
   }
 }
 
