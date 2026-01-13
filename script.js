@@ -46,7 +46,6 @@ let cameraInstance = null;
 const toggleBtn = document.getElementById("toggleBtn");
 const statusText = document.getElementById("statusText");
 const alertReason = document.getElementById("alertReason");
-const switchCamBtn = document.getElementById("switchCamBtn");
 
 const yawText = document.getElementById("yawValue");
 const pitchText = document.getElementById("pitchValue");
@@ -70,6 +69,7 @@ const eyeSlider = document.getElementById("eyeSlider");
 const eyeLimit = document.getElementById("eyeLimit");
 
 const calibBtn = document.getElementById("calibBtn");
+const switchCamBtn = document.getElementById("switchCamBtn"); // 新規追加
 
 // --- スライダー連動 ---
 yawSlider.oninput = () => { MAX_YAW = +yawSlider.value; yawLimit.textContent = MAX_YAW; };
@@ -125,19 +125,19 @@ calibBtn.onclick = () => {
   stopAlarms();
 };
 
+// --- カメラ切替 ---
+switchCamBtn.onclick = async () => {
+  currentFacingMode = (currentFacingMode === "user" ? "environment" : "user");
+  if(cameraInstance){ cameraInstance.stop(); video.srcObject = null; }
+  await startCamera();
+};
+
 // --- FaceMesh ---
 const faceMesh = new FaceMesh({ locateFile: f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
 faceMesh.setOptions({ maxNumFaces:1 });
 function dist(a,b){return Math.hypot(a.x-b.x, a.y-b.y);}
 
-// --- カメラ切替 ---
-switchCamBtn.onclick = async () => {
-  currentFacingMode = (currentFacingMode === "user") ? "environment" : "user";
-  if(cameraInstance){ cameraInstance.stop(); video.srcObject=null; }
-  await startCamera();
-};
-
-// --- カメラ起動 ---
+// --- カメラ取得（自動露出ON） ---
 async function startCamera() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -153,7 +153,7 @@ async function startCamera() {
 }
 startCamera();
 
-// --- 顔検出処理 ---
+// --- 顔検出結果処理 ---
 faceMesh.onResults(res=>{
   if(!isRunning) return;
   const now = performance.now();
@@ -211,12 +211,10 @@ faceMesh.onResults(res=>{
   for(let key of alarmKeys){
     if(conditions[key]){
       if(!alertTimers[key]) alertTimers[key]=now;
-      if((now-alertTimers[key])/1000 >= ALARM_DELAY) reasons.push(
-        key==="yaw"?"Yaw角度異常":
-        key==="pitch"?"Pitch角度異常":
-        key==="nose"?"鼻‐顎距離異常":
-        key==="area"?"顔面積異常":"目の可視率異常"
-      );
+      if((now-alertTimers[key])/1000 >= ALARM_DELAY) reasons.push(key==="yaw"?"Yaw角度異常":
+                                                       key==="pitch"?"Pitch角度異常":
+                                                       key==="nose"?"鼻‐顎距離異常":
+                                                       key==="area"?"顔面積異常":"目の可視率異常");
     } else {
       alertTimers[key]=null;
     }
