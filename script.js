@@ -17,13 +17,20 @@ const PITCH_FIXED_OFFSET = -18;
 /* ===== キャリブ ===== */
 let yawZeroOffset = 0;
 let pitchZeroOffset = 0;
-let latestRawYaw = 0;
-let latestRawPitch = 0;
+let latestYaw = 0;
+let latestPitch = 0;
 
-/* ===== 比率基準 ===== */
+/* ===== 基準比率 ===== */
 let baseNoseChin = null;
 let baseFaceArea = null;
 let baseEyeDist = null;
+
+/* ===== アラーム判定用 ===== */
+const alarmKeys = ["yaw", "pitch", "nose", "area", "eye"];
+let alertTimers = {};
+
+/* ===== 顔未検出 ===== */
+let faceMissingStart = null;
 
 /* ===== UI ===== */
 const toggleBtn = document.getElementById("toggleBtn");
@@ -36,196 +43,194 @@ const noseValue = document.getElementById("noseValue");
 const areaValue = document.getElementById("areaValue");
 const eyeValue = document.getElementById("eyeValue");
 
-const calibBtn = document.getElementById("calibBtn");
-const switchCamBtn = document.getElementById("switchCamBtn");
+/* ===== スライダー ===== */
+const yawSlider = document.getElementById("yawSlider");
+const yawLimit = document.getElementById("yawLimit");
+const pitchSlider = document.getElementById("pitchSlider");
+const pitchLimit = document.getElementById("pitchLimit");
+const timeSlider = document.getElementById("timeSlider");
+const timeLimit = document.getElementById("timeLimit");
+const faceMissingSlider = document.getElementById("faceMissingSlider");
+const faceMissingLimit = document.getElementById("faceMissingLimit");
+const noseSlider = document.getElementById("noseSlider");
+const noseLimit = document.getElementById("noseLimit");
+const areaSlider = document.getElementById("areaSlider");
+const areaLimit = document.getElementById("areaLimit");
+const eyeSlider = document.getElementById("eyeSlider");
+const eyeLimit = document.getElementById("eyeLimit");
 
-/* ===== アラーム状態 ===== */
-const ALARM_STATE = { SAFE:0, WARNING:1, DANGER:2 };
-let alarmState = ALARM_STATE.SAFE;
+yawSlider.oninput = () => { MAX_YAW = +yawSlider.value; yawLimit.textContent = MAX_YAW; };
+pitchSlider.oninput = () => { MAX_PITCH_DEG = +pitchSlider.value; pitchLimit.textContent = MAX_PITCH_DEG; };
+timeSlider.oninput = () => { ALARM_DELAY = +timeSlider.value; timeLimit.textContent = ALARM_DELAY.toFixed(1); };
+faceMissingSlider.oninput = () => { FACE_MISSING_DELAY = +faceMissingSlider.value; faceMissingLimit.textContent = FACE_MISSING_DELAY.toFixed(1); };
+noseSlider.oninput = () => { NOSE_CHIN_RATIO_THRESHOLD = +noseSlider.value; noseLimit.textContent = NOSE_CHIN_RATIO_THRESHOLD.toFixed(2); };
+areaSlider.oninput = () => { FACE_AREA_RATIO_THRESHOLD = +areaSlider.value; areaLimit.textContent = FACE_AREA_RATIO_THRESHOLD.toFixed(2); };
+eyeSlider.oninput = () => { EYE_VISIBILITY_THRESHOLD = +eyeSlider.value; eyeLimit.textContent = EYE_VISIBILITY_THRESHOLD.toFixed(2); };
+
+/* ===== 状態遷移型アラーム管理 ===== */
+const ALARM_STATE = {
+  SAFE: "safe",
+  WARNING: "warning",
+  DANGER: "danger"
+};
+
+let currentAlarmState = ALARM_STATE.SAFE;
 let alarmTimer = null;
+let alarmPlaying = false;
 
-/* ===== 音制御 ===== */
-function stopAllSounds(){
-  softAlarm.pause(); softAlarm.currentTime = 0;
-  hardAlarm.pause(); hardAlarm.currentTime = 0;
-}
-
-function clearAlarmTimer(){
-  if(alarmTimer){
+function stopAllAlarmSound() {
+  if (alarmTimer) {
     clearTimeout(alarmTimer);
     alarmTimer = null;
   }
+  softAlarm.pause();
+  softAlarm.currentTime = 0;
+  hardAlarm.pause();
+  hardAlarm.currentTime = 0;
+  alarmPlaying = false;
 }
 
-function setAlarmState(next){
-  if(alarmState === next) return;
+function enterAlarmState(state) {
+  if (currentAlarmState === state) return;
 
-  alarmState = next;
-  clearAlarmTimer();
-  stopAllSounds();
+  stopAllAlarmSound();
+  currentAlarmState = state;
 
-  if(next !== ALARM_STATE.SAFE){
-    alarmLoop();
+  if (state === ALARM_STATE.WARNING) {
+    warningLoop();
+  } else if (state === ALARM_STATE.DANGER) {
+    dangerLoop();
   }
 }
 
-function alarmLoop(){
-  clearAlarmTimer();
+function warningLoop() {
+  if (currentAlarmState !== ALARM_STATE.WARNING) return;
 
-  if(alarmState === ALARM_STATE.WARNING){
+  softAlarm.currentTime = 0;
+  softAlarm.play().catch(()=>{});
+  alarmTimer = setTimeout(() => {
+    softAlarm.pause();
     softAlarm.currentTime = 0;
-    softAlarm.play().catch(()=>{});
-
-    alarmTimer = setTimeout(()=>{
-      softAlarm.pause();
-      softAlarm.currentTime = 0;
-
-      alarmTimer = setTimeout(()=>{
-        if(alarmState === ALARM_STATE.WARNING){
-          alarmLoop();
-        }
-      }, 1000);
-    }, 500);
-  }
-
-  if(alarmState === ALARM_STATE.DANGER){
-    hardAlarm.currentTime = 0;
-    hardAlarm.play().catch(()=>{});
-
-    alarmTimer = setTimeout(()=>{
-      hardAlarm.pause();
-      hardAlarm.currentTime = 0;
-
-      alarmTimer = setTimeout(()=>{
-        if(alarmState === ALARM_STATE.DANGER){
-          alarmLoop();
-        }
-      }, 1000);
-    }, 1000);
-  }
+    alarmTimer = setTimeout(warningLoop, 1000);
+  }, 500);
 }
 
-/* ===== 開始 / 停止 ===== */
+function dangerLoop() {
+  if (currentAlarmState !== ALARM_STATE.DANGER) return;
+
+  hardAlarm.currentTime = 0;
+  hardAlarm.play().catch(()=>{});
+  alarmTimer = setTimeout(() => {
+    hardAlarm.pause();
+    hardAlarm.currentTime = 0;
+    alarmTimer = setTimeout(dangerLoop, 1000);
+  }, 1000);
+}
+
+/* ===== 開始・停止 ===== */
 toggleBtn.onclick = () => {
   isRunning = !isRunning;
-
-  if(isRunning){
+  if (isRunning) {
     toggleBtn.textContent = "■ 停止";
     toggleBtn.className = "stop";
     statusText.textContent = "🟢 作動中";
-  }else{
+  } else {
     toggleBtn.textContent = "▶ 開始";
     toggleBtn.className = "start";
     statusText.textContent = "🔴 停止中";
-    setAlarmState(ALARM_STATE.SAFE);
+    stopAllAlarmSound();
+    currentAlarmState = ALARM_STATE.SAFE;
   }
 };
 
 /* ===== キャリブ ===== */
+const calibBtn = document.getElementById("calibBtn");
 calibBtn.onclick = () => {
-  yawZeroOffset = latestRawYaw;
-  pitchZeroOffset = latestRawPitch;
-
+  yawZeroOffset = latestYaw;
+  pitchZeroOffset = latestPitch;
   baseNoseChin = null;
   baseFaceArea = null;
   baseEyeDist = null;
-
-  setAlarmState(ALARM_STATE.SAFE);
+  alertTimers = {};
 };
 
 /* ===== FaceMesh ===== */
 const faceMesh = new FaceMesh({
   locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`
 });
-faceMesh.setOptions({ maxNumFaces:1 });
+faceMesh.setOptions({ maxNumFaces: 1 });
 
-function dist(a,b){
-  return Math.hypot(a.x-b.x, a.y-b.y);
+function dist(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
 /* ===== カメラ ===== */
 let currentFacingMode = "user";
 let currentStream = null;
 
-async function startCamera(){
-  if(currentStream){
-    currentStream.getTracks().forEach(t=>t.stop());
-  }
-
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video:{ width:640, height:480, facingMode:currentFacingMode },
-    audio:false
+async function startCamera() {
+  if (currentStream) currentStream.getTracks().forEach(t => t.stop());
+  currentStream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: currentFacingMode },
+    audio: false
   });
-
-  currentStream = stream;
-  video.srcObject = stream;
+  video.srcObject = currentStream;
   await video.play();
 }
 
-switchCamBtn.onclick = async ()=>{
-  currentFacingMode = currentFacingMode==="user"?"environment":"user";
+document.getElementById("switchCamBtn").onclick = async () => {
+  currentFacingMode = currentFacingMode === "user" ? "environment" : "user";
   await startCamera();
 };
 
 /* ===== 検出ループ ===== */
-async function loop(){
-  if(isRunning){
-    await faceMesh.send({image:video});
-  }
+async function loop() {
+  if (isRunning) await faceMesh.send({ image: video });
   requestAnimationFrame(loop);
 }
+
 startCamera().then(loop);
 
-/* ===== 判定 ===== */
-let faceMissingStart = null;
-const alarmKeys = ["yaw","pitch","nose","area","eye"];
-let alertTimers = {};
-
-faceMesh.onResults(res=>{
-  if(!isRunning) return;
+/* ===== 結果処理 ===== */
+faceMesh.onResults(res => {
+  if (!isRunning) return;
   const now = performance.now();
 
   let dangerFlag = false;
   let warningFlag = false;
-  let reasons = [];
 
-  /* --- 顔未検出 --- */
-  if(!res.multiFaceLandmarks || res.multiFaceLandmarks.length===0){
-    if(!faceMissingStart) faceMissingStart = now;
-
-    if((now-faceMissingStart)/1000 >= FACE_MISSING_DELAY){
+  /* 顔未検出 → DANGER */
+  if (!res.multiFaceLandmarks || res.multiFaceLandmarks.length === 0) {
+    if (!faceMissingStart) faceMissingStart = now;
+    if ((now - faceMissingStart) / 1000 >= FACE_MISSING_DELAY) {
       dangerFlag = true;
-      reasons.push("顔未検出");
+      alertReason.textContent = "🚨 顔が見えない（危険）";
+      alertReason.className = "danger";
     }
-  }else{
+  } else {
     faceMissingStart = null;
 
     const lm = res.multiFaceLandmarks[0];
     const leftEye = lm[33], rightEye = lm[263], nose = lm[1], chin = lm[152];
 
-    const rawYaw = Math.atan2(
-      rightEye.z-leftEye.z,
-      rightEye.x-leftEye.x
-    ) * 180 / Math.PI;
-
+    const rawYaw = Math.atan2(rightEye.z - leftEye.z, rightEye.x - leftEye.x) * 180 / Math.PI;
     const eyeCenterY = (leftEye.y + rightEye.y) / 2;
-    const rawPitch =
-      ((nose.y-eyeCenterY)/(chin.y-eyeCenterY))*48 + PITCH_FIXED_OFFSET;
-
-    latestRawYaw = rawYaw;
-    latestRawPitch = rawPitch;
+    const pitch = ((nose.y - eyeCenterY) / (chin.y - eyeCenterY)) * 48 + PITCH_FIXED_OFFSET;
 
     const yaw = rawYaw - yawZeroOffset;
-    const pitch = rawPitch - pitchZeroOffset;
+    const pitchAdj = pitch - pitchZeroOffset;
+
+    latestYaw = yaw;
+    latestPitch = pitchAdj;
 
     yawText.textContent = yaw.toFixed(1);
-    pitchText.textContent = pitch.toFixed(1);
+    pitchText.textContent = pitchAdj.toFixed(1);
 
-    const noseChin = dist(nose,chin);
-    const faceArea = dist(leftEye,rightEye)*noseChin;
-    const eyeDist = dist(lm[133],lm[33]);
+    const noseChin = dist(nose, chin);
+    const faceArea = dist(leftEye, rightEye) * noseChin;
+    const eyeDist = dist(lm[133], lm[33]);
 
-    if(!baseNoseChin){
+    if (!baseNoseChin) {
       baseNoseChin = noseChin;
       baseFaceArea = faceArea;
       baseEyeDist = eyeDist;
@@ -241,39 +246,38 @@ faceMesh.onResults(res=>{
 
     const conditions = {
       yaw: Math.abs(yaw) > MAX_YAW,
-      pitch: Math.abs(pitch) > MAX_PITCH_DEG,
+      pitch: Math.abs(pitchAdj) > MAX_PITCH_DEG,
       nose: noseRatio < NOSE_CHIN_RATIO_THRESHOLD,
       area: areaRatio < FACE_AREA_RATIO_THRESHOLD,
       eye: eyeRatio < EYE_VISIBILITY_THRESHOLD
     };
 
-    for(const key of alarmKeys){
-      if(conditions[key]){
-        if(!alertTimers[key]) alertTimers[key] = now;
-        if((now-alertTimers[key])/1000 >= ALARM_DELAY){
+    for (let key of alarmKeys) {
+      if (conditions[key]) {
+        if (!alertTimers[key]) alertTimers[key] = now;
+        if ((now - alertTimers[key]) / 1000 >= ALARM_DELAY) {
           warningFlag = true;
-          reasons.push(key);
         }
-      }else{
+      } else {
         delete alertTimers[key];
       }
     }
+
+    if (warningFlag) {
+      alertReason.textContent = "⚠️ 姿勢異常";
+      alertReason.className = "warning";
+    } else if (!dangerFlag) {
+      alertReason.textContent = "異常なし";
+      alertReason.className = "safe";
+    }
   }
 
-  /* --- 状態決定（最重要） --- */
-  if(dangerFlag){
-    alertReason.textContent = "🚨 " + reasons.join(" / ");
-    alertReason.className = "danger";
-    setAlarmState(ALARM_STATE.DANGER);
-  }
-  else if(warningFlag){
-    alertReason.textContent = "⚠️ " + reasons.join(" / ");
-    alertReason.className = "warning";
-    setAlarmState(ALARM_STATE.WARNING);
-  }
-  else{
-    alertReason.textContent = "異常なし";
-    alertReason.className = "safe";
-    setAlarmState(ALARM_STATE.SAFE);
+  /* ===== 状態遷移（優先度厳守） ===== */
+  if (dangerFlag) {
+    enterAlarmState(ALARM_STATE.DANGER);
+  } else if (warningFlag) {
+    enterAlarmState(ALARM_STATE.WARNING);
+  } else {
+    enterAlarmState(ALARM_STATE.SAFE);
   }
 });
