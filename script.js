@@ -14,13 +14,17 @@ let FACE_AREA_RATIO_THRESHOLD = 0.6;
 let EYE_VISIBILITY_THRESHOLD = 0.4;
 const PITCH_FIXED_OFFSET = -18;
 
-// キャリブ
+// キャリブ（raw基準）
 let yawZeroOffset = 0;
 let pitchZeroOffset = 0;
+
+// 最新値
 let latestYaw = 0;
 let latestPitch = 0;
+let latestRawYaw = 0;
+let latestRawPitch = 0;
 
-// 基準値
+// 基準値（比率）
 let baseNoseChin = null;
 let baseFaceArea = null;
 let baseEyeDist = null;
@@ -86,13 +90,9 @@ function playSoft(){
     softAlarm.currentTime = 0;
     softAlarm.play().catch(()=>{});
     lastSoftAlarmTime = now;
-    setTimeout(()=>{
-      softAlarm.pause();
-      softAlarm.currentTime = 0;
-    }, SOFT_ALARM_ON);
+    setTimeout(()=>{ softAlarm.pause(); softAlarm.currentTime = 0; }, SOFT_ALARM_ON);
   }
 }
-
 function playHard(){
   const now = performance.now();
   if(now - lastHardAlarmTime >= HARD_ALARM_INTERVAL){
@@ -101,7 +101,6 @@ function playHard(){
     lastHardAlarmTime = now;
   }
 }
-
 function stopAlarms(){
   softAlarm.pause(); softAlarm.currentTime=0;
   hardAlarm.pause(); hardAlarm.currentTime=0;
@@ -110,44 +109,39 @@ function stopAlarms(){
 // --- 開始/停止 ---
 toggleBtn.onclick = () => {
   isRunning = !isRunning;
-  if(isRunning){
-    toggleBtn.textContent = "■ 停止";
-    toggleBtn.className="stop";
-    statusText.textContent="🟢 作動中";
-  } else {
-    toggleBtn.textContent = "▶ 開始";
-    toggleBtn.className="start";
-    statusText.textContent="🔴 停止中";
-    stopAlarms();
-  }
+  toggleBtn.textContent = isRunning ? "■ 停止" : "▶ 開始";
+  toggleBtn.className = isRunning ? "stop" : "start";
+  statusText.textContent = isRunning ? "🟢 作動中" : "🔴 停止中";
+  if(!isRunning) stopAlarms();
 };
 
-// --- キャリブ ---
+// --- キャリブ（raw基準）---
 calibBtn.onclick = () => {
-  yawZeroOffset = latestYaw;
-  pitchZeroOffset = latestPitch;
+  yawZeroOffset = latestRawYaw;
+  pitchZeroOffset = latestRawPitch;
+
   baseNoseChin = null;
   baseFaceArea = null;
   baseEyeDist = null;
+
   alertTimers = {};
   faceMissingStart = null;
   stopAlarms();
 };
 
 // --- FaceMesh ---
-const faceMesh = new FaceMesh({ locateFile: f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
+const faceMesh = new FaceMesh({ locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
 faceMesh.setOptions({ maxNumFaces:1 });
-function dist(a,b){return Math.hypot(a.x-b.x, a.y-b.y);}
+const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
 
 // --- カメラ ---
 async function startCamera(){
   if(currentStream) currentStream.getTracks().forEach(t=>t.stop());
-  const stream = await navigator.mediaDevices.getUserMedia({
+  currentStream = await navigator.mediaDevices.getUserMedia({
     video:{width:640,height:480,facingMode:currentFacingMode},
     audio:false
   });
-  currentStream = stream;
-  video.srcObject = stream;
+  video.srcObject = currentStream;
   await video.play();
 }
 switchCamBtn.onclick = async ()=>{
@@ -155,20 +149,19 @@ switchCamBtn.onclick = async ()=>{
   await startCamera();
 };
 
-// --- 検出ループ ---
-async function faceDetectionLoop(){
-  if(isRunning) await faceMesh.send({image: video});
-  requestAnimationFrame(faceDetectionLoop);
+// --- ループ ---
+async function loop(){
+  if(isRunning) await faceMesh.send({image:video});
+  requestAnimationFrame(loop);
 }
-startCamera().then(()=>faceDetectionLoop());
+startCamera().then(loop);
 
 // --- 結果処理 ---
 faceMesh.onResults(res=>{
   if(!isRunning) return;
   const now = performance.now();
 
-  // 顔未検出
-  if(!res.multiFaceLandmarks || res.multiFaceLandmarks.length===0){
+  if(!res.multiFaceLandmarks?.length){
     if(!faceMissingStart) faceMissingStart = now;
     if((now-faceMissingStart)/1000 >= FACE_MISSING_DELAY){
       alertReason.textContent="🚨 顔が見えない（危険）";
@@ -183,16 +176,16 @@ faceMesh.onResults(res=>{
 
   const lm=res.multiFaceLandmarks[0];
   const leftEye=lm[33], rightEye=lm[263], nose=lm[1], chin=lm[152];
-  const rawYaw=Math.atan2(rightEye.z-leftEye.z, rightEye.x-leftEye.x)*180/Math.PI;
+
+  latestRawYaw = Math.atan2(rightEye.z-leftEye.z, rightEye.x-leftEye.x)*180/Math.PI;
   const eyeCenterY=(leftEye.y+rightEye.y)/2;
-  const pitch=((nose.y-eyeCenterY)/(chin.y-eyeCenterY))*48 + PITCH_FIXED_OFFSET;
+  latestRawPitch=((nose.y-eyeCenterY)/(chin.y-eyeCenterY))*48 + PITCH_FIXED_OFFSET;
 
-  const yaw=rawYaw-yawZeroOffset;
-  const pitchAdj=pitch-pitchZeroOffset;
-  latestYaw=yaw; latestPitch=pitchAdj;
+  latestYaw = latestRawYaw - yawZeroOffset;
+  latestPitch = latestRawPitch - pitchZeroOffset;
 
-  yawText.textContent=yaw.toFixed(1);
-  pitchText.textContent=pitchAdj.toFixed(1);
+  yawText.textContent = latestYaw.toFixed(1);
+  pitchText.textContent = latestPitch.toFixed(1);
 
   const noseChin=dist(nose,chin);
   const faceArea=dist(leftEye,rightEye)*noseChin;
@@ -212,37 +205,32 @@ faceMesh.onResults(res=>{
   areaValue.textContent=areaRatio.toFixed(2);
   eyeValue.textContent=eyeRatio.toFixed(2);
 
-  const conditions = {
-    yaw: Math.abs(yaw)>MAX_YAW,
-    pitch: Math.abs(pitchAdj)>MAX_PITCH_DEG,
-    nose: noseRatio<NOSE_CHIN_RATIO_THRESHOLD,
-    area: areaRatio<FACE_AREA_RATIO_THRESHOLD,
-    eye: eyeRatio<EYE_VISIBILITY_THRESHOLD
+  const conditions={
+    yaw:Math.abs(latestYaw)>MAX_YAW,
+    pitch:Math.abs(latestPitch)>MAX_PITCH_DEG,
+    nose:noseRatio<NOSE_CHIN_RATIO_THRESHOLD,
+    area:areaRatio<FACE_AREA_RATIO_THRESHOLD,
+    eye:eyeRatio<EYE_VISIBILITY_THRESHOLD
   };
 
-  const messages = {
-    yaw: "Yaw角度超過",
-    pitch: "Pitch角度超過",
-    nose: "鼻‐顎距離低下",
-    area: "顔面積低下",
-    eye: "目の可視率低下"
+  const labels={
+    yaw:"Yaw角度超過",
+    pitch:"Pitch角度超過",
+    nose:"鼻‐顎距離低下",
+    area:"顔面積低下",
+    eye:"目の可視率低下"
   };
 
-  let reasons = [];
-
-  for(let key of alarmKeys){
-    if(conditions[key]){
-      if(!alertTimers[key]) alertTimers[key]=now;
-      if((now-alertTimers[key])/1000 >= ALARM_DELAY){
-        reasons.push(messages[key]);
-      }
-    } else {
-      delete alertTimers[key];
-    }
+  const reasons=[];
+  for(const k of alarmKeys){
+    if(conditions[k]){
+      if(!alertTimers[k]) alertTimers[k]=now;
+      if((now-alertTimers[k])/1000>=ALARM_DELAY) reasons.push(labels[k]);
+    } else delete alertTimers[k];
   }
 
   if(reasons.length){
-    alertReason.textContent="⚠️ " + reasons.join(" / ");
+    alertReason.textContent="⚠️ "+reasons.join(" / ");
     alertReason.className="warning";
     playSoft();
   } else {
