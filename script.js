@@ -74,7 +74,7 @@ areaSlider.oninput = () => { FACE_AREA_RATIO_THRESHOLD = +areaSlider.value; area
 eyeSlider.oninput = () => { EYE_VISIBILITY_THRESHOLD = +eyeSlider.value; eyeLimit.textContent = EYE_VISIBILITY_THRESHOLD.toFixed(2); };
 
 /* =====================
-   アラーム FSM（★修正対象）
+   アラーム FSM
 ===================== */
 const ALARM_STATE = {
   SAFE: 0,
@@ -86,8 +86,10 @@ let alarmState = ALARM_STATE.SAFE;
 let alarmTimer = null;
 
 function stopAllSounds(){
-  softAlarm.pause(); softAlarm.currentTime = 0;
-  hardAlarm.pause(); hardAlarm.currentTime = 0;
+  softAlarm.pause();
+  softAlarm.currentTime = 0;
+  hardAlarm.pause();
+  hardAlarm.currentTime = 0;
 }
 
 function clearAlarmTimer(){
@@ -99,14 +101,6 @@ function clearAlarmTimer(){
 
 function setAlarmState(next){
   if(alarmState === next) return;
-
-  // ★ 優先度制御：DANGER中は降格させない
-  if(
-    alarmState === ALARM_STATE.DANGER &&
-    next !== ALARM_STATE.DANGER
-  ){
-    return;
-  }
 
   alarmState = next;
   clearAlarmTimer();
@@ -134,9 +128,8 @@ function alarmTick(){
         }
       }, 1000);
     }, 500);
-  }
 
-  if(alarmState === ALARM_STATE.DANGER){
+  } else if(alarmState === ALARM_STATE.DANGER){
     hardAlarm.currentTime = 0;
     hardAlarm.play().catch(()=>{});
 
@@ -202,6 +195,7 @@ function dist(a,b){
 ===================== */
 let currentFacingMode = "user";
 let currentStream = null;
+let cameraSwitching = false;
 
 async function startCamera(){
   if(currentStream){
@@ -219,21 +213,29 @@ async function startCamera(){
 }
 
 switchCamBtn.onclick = async () => {
-  currentFacingMode = currentFacingMode === "user" ? "environment" : "user";
+  cameraSwitching = true;
+
+  currentFacingMode =
+    currentFacingMode === "user" ? "environment" : "user";
+
   await startCamera();
+
+  cameraSwitching = false;
 };
+
 
 /* =====================
    検出ループ
 ===================== */
 async function faceDetectionLoop(){
-  if(isRunning){
+  if(isRunning && !cameraSwitching){
     await faceMesh.send({ image: video });
   }
   requestAnimationFrame(faceDetectionLoop);
 }
 
 startCamera().then(()=>faceDetectionLoop());
+
 
 /* =====================
    検出結果
