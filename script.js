@@ -25,11 +25,11 @@ let baseNoseChin = null;
 let baseFaceArea = null;
 let baseEyeDist = null;
 
-// ================= 判定用 =================
+// ================= 判定 =================
 const alarmKeys = ["yaw","pitch","nose","area","eye"];
 let alertTimers = {};
 
-// ================= 状態FSM =================
+// ================= アラームFSM =================
 const ALARM_STATE = {
   SAFE: "safe",
   WARNING: "warning",
@@ -37,6 +37,8 @@ const ALARM_STATE = {
 };
 
 let currentAlarmState = ALARM_STATE.SAFE;
+let alarmInterval = null;
+let alarmTimeout = null;
 
 // ================= 顔未検出 =================
 let faceMissingStart = null;
@@ -83,21 +85,54 @@ noseSlider.oninput = () => { NOSE_CHIN_RATIO_THRESHOLD = +noseSlider.value; nose
 areaSlider.oninput = () => { FACE_AREA_RATIO_THRESHOLD = +areaSlider.value; areaLimit.textContent = FACE_AREA_RATIO_THRESHOLD.toFixed(2); };
 eyeSlider.oninput = () => { EYE_VISIBILITY_THRESHOLD = +eyeSlider.value; eyeLimit.textContent = EYE_VISIBILITY_THRESHOLD.toFixed(2); };
 
-// ================= 音FSM =================
-function setAlarmState(nextState){
-  if(currentAlarmState === nextState) return;
+// ================= アラーム制御 =================
+function clearAlarmTimers(){
+  if(alarmInterval) clearInterval(alarmInterval);
+  if(alarmTimeout) clearTimeout(alarmTimeout);
+  alarmInterval = null;
+  alarmTimeout = null;
 
-  // 全停止
   softAlarm.pause(); softAlarm.currentTime = 0;
   hardAlarm.pause(); hardAlarm.currentTime = 0;
+}
 
-  currentAlarmState = nextState;
-
-  if(nextState === ALARM_STATE.WARNING){
+function startWarningLoop(){
+  const playCycle = () => {
+    softAlarm.currentTime = 0;
     softAlarm.play().catch(()=>{});
-  }
-  else if(nextState === ALARM_STATE.DANGER){
+    alarmTimeout = setTimeout(()=>{
+      softAlarm.pause();
+      softAlarm.currentTime = 0;
+    }, 500);
+  };
+  playCycle();
+  alarmInterval = setInterval(playCycle, 1500); // 0.5 ON + 1.0 OFF
+}
+
+function startDangerLoop(){
+  const playCycle = () => {
+    hardAlarm.currentTime = 0;
     hardAlarm.play().catch(()=>{});
+    alarmTimeout = setTimeout(()=>{
+      hardAlarm.pause();
+      hardAlarm.currentTime = 0;
+    }, 1000);
+  };
+  playCycle();
+  alarmInterval = setInterval(playCycle, 2000); // 1.0 ON + 1.0 OFF
+}
+
+function setAlarmState(next){
+  if(currentAlarmState === next) return;
+
+  clearAlarmTimers();
+  currentAlarmState = next;
+
+  if(next === ALARM_STATE.WARNING){
+    startWarningLoop();
+  }
+  else if(next === ALARM_STATE.DANGER){
+    startDangerLoop();
   }
 }
 
