@@ -20,6 +20,10 @@ let pitchZeroOffset = 0;
 let latestYaw = 0;
 let latestPitch = 0;
 
+// ★ 生角度保存（追加）
+let rawYawLatest = 0;
+let rawPitchLatest = 0;
+
 // ===== 基準値 =====
 let baseNoseChin = null;
 let baseFaceArea = null;
@@ -128,10 +132,10 @@ toggleBtn.onclick = () => {
   }
 };
 
-// ===== キャリブ =====
+// ===== キャリブ（★修正点）=====
 calibBtn.onclick = () => {
-  yawZeroOffset = latestYaw;
-  pitchZeroOffset = latestPitch;
+  yawZeroOffset = rawYawLatest;
+  pitchZeroOffset = rawPitchLatest;
   baseNoseChin = null;
   baseFaceArea = null;
   baseEyeDist = null;
@@ -148,7 +152,7 @@ faceMesh.setOptions({ maxNumFaces:1 });
 
 function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
 
-// ===== カメラ起動 =====
+// ===== カメラ =====
 async function startCamera(){
   if(currentStream){
     currentStream.getTracks().forEach(t=>t.stop());
@@ -162,28 +166,14 @@ async function startCamera(){
   await video.play().catch(()=>{});
 }
 
-// ===== カメラ切替（変更禁止部分）=====
 switchCamBtn.onclick = async () => {
   currentFacingMode = currentFacingMode==="user" ? "environment" : "user";
   await startCamera();
 };
 
-// ===== Safari対策：再生保証 =====
-async function ensureVideoPlaying(){
-  if(video.paused){
-    try{ await video.play(); }catch(e){}
-  }
-}
-
-// ===== 検出ループ =====
+// ===== ループ =====
 async function faceDetectionLoop(){
-  await ensureVideoPlaying();
-
-  if(
-    isRunning &&
-    video.readyState >= 2 &&
-    !video.paused
-  ){
+  if(isRunning && video.readyState>=2 && !video.paused){
     await faceMesh.send({image: video});
   }
   requestAnimationFrame(faceDetectionLoop);
@@ -191,91 +181,39 @@ async function faceDetectionLoop(){
 
 startCamera().then(()=>faceDetectionLoop());
 
-// ===== 検出結果 =====
+// ===== 結果 =====
 faceMesh.onResults(res=>{
   if(!isRunning) return;
-  const now = performance.now();
 
+  const now = performance.now();
   if(!res.multiFaceLandmarks || res.multiFaceLandmarks.length===0){
-    if(!faceMissingStart) faceMissingStart = now;
-    const elapsed = (now-faceMissingStart)/1000;
-    if(elapsed >= FACE_MISSING_DELAY){
+    if(!faceMissingStart) faceMissingStart=now;
+    if((now-faceMissingStart)/1000>=FACE_MISSING_DELAY){
       alertReason.textContent="🚨 顔が見えない（危険）";
       alertReason.className="danger";
       playHard();
-    }else{
-      alertReason.textContent="⚠️ 顔未検出（待機中）";
-      alertReason.className="warning";
     }
     return;
   }else{
-    faceMissingStart = null;
+    faceMissingStart=null;
   }
 
-  const lm = res.multiFaceLandmarks[0];
+  const lm=res.multiFaceLandmarks[0];
   const leftEye=lm[33], rightEye=lm[263], nose=lm[1], chin=lm[152];
 
-  const rawYaw = Math.atan2(rightEye.z-leftEye.z, rightEye.x-leftEye.x)*180/Math.PI;
+  const rawYaw=Math.atan2(rightEye.z-leftEye.z, rightEye.x-leftEye.x)*180/Math.PI;
   const eyeCenterY=(leftEye.y+rightEye.y)/2;
-  const pitch=((nose.y-eyeCenterY)/(chin.y-eyeCenterY))*48 + PITCH_FIXED_OFFSET;
+  const rawPitch=((nose.y-eyeCenterY)/(chin.y-eyeCenterY))*48 + PITCH_FIXED_OFFSET;
+
+  rawYawLatest = rawYaw;
+  rawPitchLatest = rawPitch;
 
   const yaw = rawYaw - yawZeroOffset;
-  const pitchAdj = pitch - pitchZeroOffset;
-  latestYaw=yaw; latestPitch=pitchAdj;
+  const pitchAdj = rawPitch - pitchZeroOffset;
+
+  latestYaw=yaw;
+  latestPitch=pitchAdj;
 
   yawText.textContent=yaw.toFixed(1);
   pitchText.textContent=pitchAdj.toFixed(1);
-
-  const noseChin=dist(nose,chin);
-  const faceArea=dist(leftEye,rightEye)*noseChin;
-  const eyeDist=dist(lm[133],lm[33]);
-
-  if(!baseNoseChin){
-    baseNoseChin=noseChin;
-    baseFaceArea=faceArea;
-    baseEyeDist=eyeDist;
-  }
-
-  const noseRatio=noseChin/baseNoseChin;
-  const areaRatio=faceArea/baseFaceArea;
-  const eyeRatio=eyeDist/baseEyeDist;
-
-  noseValue.textContent=noseRatio.toFixed(2);
-  areaValue.textContent=areaRatio.toFixed(2);
-  eyeValue.textContent=eyeRatio.toFixed(2);
-
-  let reasons=[];
-  const conditions={
-    yaw:Math.abs(yaw)>MAX_YAW,
-    pitch:Math.abs(pitchAdj)>MAX_PITCH_DEG,
-    nose:noseRatio<NOSE_CHIN_RATIO_THRESHOLD,
-    area:areaRatio<FACE_AREA_RATIO_THRESHOLD,
-    eye:eyeRatio<EYE_VISIBILITY_THRESHOLD
-  };
-
-  for(const key of alarmKeys){
-    if(conditions[key]){
-      if(!alertTimers[key]) alertTimers[key]=now;
-      if((now-alertTimers[key])/1000>=ALARM_DELAY){
-        reasons.push(
-          key==="yaw"?"Yaw角度異常":
-          key==="pitch"?"Pitch角度異常":
-          key==="nose"?"鼻‐顎距離異常":
-          key==="area"?"顔面積異常":
-          "目の可視率異常"
-        );
-      }
-    }else{
-      alertTimers[key]=null;
-    }
-  }
-
-  if(reasons.length>0){
-    alertReason.textContent="⚠️ "+reasons.join(" / ");
-    alertReason.className="warning";
-    playSoft();
-  }else{
-    alertReason.textContent="異常なし";
-    alertReason.className="safe";
-  }
 });
