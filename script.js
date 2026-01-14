@@ -28,7 +28,6 @@ let baseEyeDist = null;
 // 軽度アラーム
 const alarmKeys = ["yaw","pitch","nose","area","eye"];
 let alertTimers = {};
-let softAlarmActive = false;
 let lastSoftAlarmTime = 0;
 const SOFT_ALARM_INTERVAL = 1000;
 const SOFT_ALARM_ON = 500;
@@ -87,6 +86,10 @@ function playSoft(){
     softAlarm.currentTime = 0;
     softAlarm.play().catch(()=>{});
     lastSoftAlarmTime = now;
+    setTimeout(()=>{
+      softAlarm.pause();
+      softAlarm.currentTime = 0;
+    }, SOFT_ALARM_ON);
   }
 }
 
@@ -99,29 +102,15 @@ function playHard(){
   }
 }
 
-function stopSoftAlarm(){
-  softAlarm.pause();
-  softAlarm.currentTime = 0;
-  softAlarmActive = false;
-}
-
 function stopAlarms(){
-  stopSoftAlarm();
-  hardAlarm.pause();
-  hardAlarm.currentTime = 0;
+  softAlarm.pause(); softAlarm.currentTime=0;
+  hardAlarm.pause(); hardAlarm.currentTime=0;
 }
 
-// --- 開始 / 停止 ---
+// --- 開始/停止 ---
 toggleBtn.onclick = () => {
   isRunning = !isRunning;
   if(isRunning){
-    hardAlarm.muted = true;
-    hardAlarm.play().then(()=>{
-      hardAlarm.pause();
-      hardAlarm.currentTime = 0;
-      hardAlarm.muted = false;
-    }).catch(()=>{});
-
     toggleBtn.textContent = "■ 停止";
     toggleBtn.className="stop";
     statusText.textContent="🟢 作動中";
@@ -137,22 +126,18 @@ toggleBtn.onclick = () => {
 calibBtn.onclick = () => {
   yawZeroOffset = latestYaw;
   pitchZeroOffset = latestPitch;
-
   baseNoseChin = null;
   baseFaceArea = null;
   baseEyeDist = null;
-
   alertTimers = {};
   faceMissingStart = null;
   stopAlarms();
 };
 
 // --- FaceMesh ---
-const faceMesh = new FaceMesh({
-  locateFile: f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`
-});
+const faceMesh = new FaceMesh({ locateFile: f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
 faceMesh.setOptions({ maxNumFaces:1 });
-function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+function dist(a,b){return Math.hypot(a.x-b.x, a.y-b.y);}
 
 // --- カメラ ---
 async function startCamera(){
@@ -165,7 +150,6 @@ async function startCamera(){
   video.srcObject = stream;
   await video.play();
 }
-
 switchCamBtn.onclick = async ()=>{
   currentFacingMode = currentFacingMode==="user"?"environment":"user";
   await startCamera();
@@ -183,14 +167,9 @@ faceMesh.onResults(res=>{
   if(!isRunning) return;
   const now = performance.now();
 
-  // ===== 顔未検出（修正ポイント）=====
+  // 顔未検出
   if(!res.multiFaceLandmarks || res.multiFaceLandmarks.length===0){
     if(!faceMissingStart) faceMissingStart = now;
-
-    // 🔽 追加（最小変更）
-    alertTimers = {};
-    stopSoftAlarm();
-
     if((now-faceMissingStart)/1000 >= FACE_MISSING_DELAY){
       alertReason.textContent="🚨 顔が見えない（危険）";
       alertReason.className="danger";
@@ -198,14 +177,12 @@ faceMesh.onResults(res=>{
     }
     return;
   }
-  // ==================================
 
   faceMissingStart = null;
   lastHardAlarmTime = 0;
 
   const lm=res.multiFaceLandmarks[0];
   const leftEye=lm[33], rightEye=lm[263], nose=lm[1], chin=lm[152];
-
   const rawYaw=Math.atan2(rightEye.z-leftEye.z, rightEye.x-leftEye.x)*180/Math.PI;
   const eyeCenterY=(leftEye.y+rightEye.y)/2;
   const pitch=((nose.y-eyeCenterY)/(chin.y-eyeCenterY))*48 + PITCH_FIXED_OFFSET;
@@ -221,7 +198,7 @@ faceMesh.onResults(res=>{
   const faceArea=dist(leftEye,rightEye)*noseChin;
   const eyeDist=dist(lm[133],lm[33]);
 
-  if(baseNoseChin===null){
+  if(!baseNoseChin){
     baseNoseChin=noseChin;
     baseFaceArea=faceArea;
     baseEyeDist=eyeDist;
@@ -235,7 +212,7 @@ faceMesh.onResults(res=>{
   areaValue.textContent=areaRatio.toFixed(2);
   eyeValue.textContent=eyeRatio.toFixed(2);
 
-  const conditions={
+  const conditions = {
     yaw: Math.abs(yaw)>MAX_YAW,
     pitch: Math.abs(pitchAdj)>MAX_PITCH_DEG,
     nose: noseRatio<NOSE_CHIN_RATIO_THRESHOLD,
@@ -243,12 +220,21 @@ faceMesh.onResults(res=>{
     eye: eyeRatio<EYE_VISIBILITY_THRESHOLD
   };
 
-  let reasons=[];
+  const messages = {
+    yaw: "Yaw角度超過",
+    pitch: "Pitch角度超過",
+    nose: "鼻‐顎距離低下",
+    area: "顔面積低下",
+    eye: "目の可視率低下"
+  };
+
+  let reasons = [];
+
   for(let key of alarmKeys){
     if(conditions[key]){
       if(!alertTimers[key]) alertTimers[key]=now;
-      if((now-alertTimers[key])/1000>=ALARM_DELAY){
-        reasons.push(key);
+      if((now-alertTimers[key])/1000 >= ALARM_DELAY){
+        reasons.push(messages[key]);
       }
     } else {
       delete alertTimers[key];
@@ -256,7 +242,7 @@ faceMesh.onResults(res=>{
   }
 
   if(reasons.length){
-    alertReason.textContent="⚠️ 姿勢異常";
+    alertReason.textContent="⚠️ " + reasons.join(" / ");
     alertReason.className="warning";
     playSoft();
   } else {
