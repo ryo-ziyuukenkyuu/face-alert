@@ -4,9 +4,9 @@ const hardAlarm = document.getElementById("hardAlarm");
 
 let isRunning = false;
 
-// ========================
-// 閾値
-// ========================
+/* =====================
+   閾値
+===================== */
 let MAX_YAW = 80;
 let MAX_PITCH_DEG = 25;
 let ALARM_DELAY = 0;
@@ -16,22 +16,24 @@ let FACE_AREA_RATIO_THRESHOLD = 0.6;
 let EYE_VISIBILITY_THRESHOLD = 0.4;
 const PITCH_FIXED_OFFSET = -18;
 
-// ========================
-// キャリブ
-// ========================
+/* =====================
+   キャリブ
+===================== */
 let yawZeroOffset = 0;
 let pitchZeroOffset = 0;
 let latestRawYaw = 0;
 let latestRawPitch = 0;
 
-// 比率基準
+/* =====================
+   比率基準
+===================== */
 let baseNoseChin = null;
 let baseFaceArea = null;
 let baseEyeDist = null;
 
-// ========================
-// UI
-// ========================
+/* =====================
+   UI
+===================== */
 const toggleBtn = document.getElementById("toggleBtn");
 const statusText = document.getElementById("statusText");
 const alertReason = document.getElementById("alertReason");
@@ -60,9 +62,9 @@ const eyeLimit = document.getElementById("eyeLimit");
 const calibBtn = document.getElementById("calibBtn");
 const switchCamBtn = document.getElementById("switchCamBtn");
 
-// ========================
-// スライダー
-// ========================
+/* =====================
+   スライダー
+===================== */
 yawSlider.oninput = () => { MAX_YAW = +yawSlider.value; yawLimit.textContent = MAX_YAW; };
 pitchSlider.oninput = () => { MAX_PITCH_DEG = +pitchSlider.value; pitchLimit.textContent = MAX_PITCH_DEG; };
 timeSlider.oninput = () => { ALARM_DELAY = +timeSlider.value; timeLimit.textContent = ALARM_DELAY.toFixed(1); };
@@ -71,9 +73,9 @@ noseSlider.oninput = () => { NOSE_CHIN_RATIO_THRESHOLD = +noseSlider.value; nose
 areaSlider.oninput = () => { FACE_AREA_RATIO_THRESHOLD = +areaSlider.value; areaLimit.textContent = FACE_AREA_RATIO_THRESHOLD.toFixed(2); };
 eyeSlider.oninput = () => { EYE_VISIBILITY_THRESHOLD = +eyeSlider.value; eyeLimit.textContent = EYE_VISIBILITY_THRESHOLD.toFixed(2); };
 
-// ========================
-// アラーム FSM
-// ========================
+/* =====================
+   アラーム FSM
+===================== */
 const ALARM_STATE = {
   SAFE: 0,
   WARNING: 1,
@@ -83,16 +85,16 @@ const ALARM_STATE = {
 let alarmState = ALARM_STATE.SAFE;
 let alarmTimer = null;
 
+function stopAllSounds(){
+  softAlarm.pause(); softAlarm.currentTime = 0;
+  hardAlarm.pause(); hardAlarm.currentTime = 0;
+}
+
 function clearAlarmTimer(){
   if(alarmTimer){
     clearTimeout(alarmTimer);
     alarmTimer = null;
   }
-}
-
-function stopAllSounds(){
-  softAlarm.pause(); softAlarm.currentTime = 0;
-  hardAlarm.pause(); hardAlarm.currentTime = 0;
 }
 
 function setAlarmState(next){
@@ -102,39 +104,51 @@ function setAlarmState(next){
   clearAlarmTimer();
   stopAllSounds();
 
-  if(next === ALARM_STATE.WARNING) warningLoop();
-  if(next === ALARM_STATE.DANGER) dangerLoop();
+  if(next !== ALARM_STATE.SAFE){
+    alarmTick();
+  }
 }
 
-function warningLoop(){
-  if(alarmState !== ALARM_STATE.WARNING) return;
+function alarmTick(){
+  clearAlarmTimer();
 
-  softAlarm.currentTime = 0;
-  softAlarm.play().catch(()=>{});
-
-  alarmTimer = setTimeout(()=>{
-    softAlarm.pause();
+  // ★ 状態を必ず再確認する（幽霊タイマー防止）
+  if(alarmState === ALARM_STATE.WARNING){
     softAlarm.currentTime = 0;
-    alarmTimer = setTimeout(warningLoop, 1000);
-  }, 500);
-}
+    softAlarm.play().catch(()=>{});
 
-function dangerLoop(){
-  if(alarmState !== ALARM_STATE.DANGER) return;
+    alarmTimer = setTimeout(()=>{
+      softAlarm.pause();
+      softAlarm.currentTime = 0;
 
-  hardAlarm.currentTime = 0;
-  hardAlarm.play().catch(()=>{});
+      alarmTimer = setTimeout(()=>{
+        if(alarmState === ALARM_STATE.WARNING){
+          alarmTick();
+        }
+      }, 1000);
+    }, 500);
+  }
 
-  alarmTimer = setTimeout(()=>{
-    hardAlarm.pause();
+  if(alarmState === ALARM_STATE.DANGER){
     hardAlarm.currentTime = 0;
-    alarmTimer = setTimeout(dangerLoop, 1000);
-  }, 1000);
+    hardAlarm.play().catch(()=>{});
+
+    alarmTimer = setTimeout(()=>{
+      hardAlarm.pause();
+      hardAlarm.currentTime = 0;
+
+      alarmTimer = setTimeout(()=>{
+        if(alarmState === ALARM_STATE.DANGER){
+          alarmTick();
+        }
+      }, 1000);
+    }, 1000);
+  }
 }
 
-// ========================
-// 開始 / 停止
-// ========================
+/* =====================
+   開始 / 停止
+===================== */
 toggleBtn.onclick = () => {
   isRunning = !isRunning;
 
@@ -150,9 +164,9 @@ toggleBtn.onclick = () => {
   }
 };
 
-// ========================
-// キャリブ
-// ========================
+/* =====================
+   キャリブ
+===================== */
 calibBtn.onclick = () => {
   yawZeroOffset = latestRawYaw;
   pitchZeroOffset = latestRawPitch;
@@ -164,63 +178,73 @@ calibBtn.onclick = () => {
   setAlarmState(ALARM_STATE.SAFE);
 };
 
-// ========================
-// FaceMesh
-// ========================
+/* =====================
+   FaceMesh
+===================== */
 const faceMesh = new FaceMesh({
   locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`
 });
 faceMesh.setOptions({ maxNumFaces: 1 });
 
-function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+function dist(a,b){
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
 
-// ========================
-// カメラ
-// ========================
+/* =====================
+   カメラ
+===================== */
 let currentFacingMode = "user";
 let currentStream = null;
 
 async function startCamera(){
-  if(currentStream) currentStream.getTracks().forEach(t=>t.stop());
+  if(currentStream){
+    currentStream.getTracks().forEach(t => t.stop());
+  }
+
   const stream = await navigator.mediaDevices.getUserMedia({
-    video:{ width:640, height:480, facingMode:currentFacingMode },
-    audio:false
+    video: { width: 640, height: 480, facingMode: currentFacingMode },
+    audio: false
   });
+
   currentStream = stream;
   video.srcObject = stream;
   await video.play();
 }
 
-switchCamBtn.onclick = async ()=>{
-  currentFacingMode = currentFacingMode==="user"?"environment":"user";
+switchCamBtn.onclick = async () => {
+  currentFacingMode = currentFacingMode === "user" ? "environment" : "user";
   await startCamera();
 };
 
-// ========================
-// 検出ループ
-// ========================
-async function loop(){
-  if(isRunning) await faceMesh.send({image: video});
-  requestAnimationFrame(loop);
+/* =====================
+   検出ループ
+===================== */
+async function faceDetectionLoop(){
+  if(isRunning){
+    await faceMesh.send({ image: video });
+  }
+  requestAnimationFrame(faceDetectionLoop);
 }
-startCamera().then(loop);
 
-// ========================
-// 結果処理
-// ========================
+startCamera().then(()=>faceDetectionLoop());
+
+/* =====================
+   検出結果
+===================== */
 let faceMissingStart = null;
 const alarmKeys = ["yaw","pitch","nose","area","eye"];
 let alertTimers = {};
 
-faceMesh.onResults(res=>{
+faceMesh.onResults(res => {
   if(!isRunning) return;
+
   const now = performance.now();
 
-  // --- 顔未検出 ---
-  if(!res.multiFaceLandmarks || res.multiFaceLandmarks.length===0){
+  /* ---- 顔未検出 ---- */
+  if(!res.multiFaceLandmarks || res.multiFaceLandmarks.length === 0){
     if(!faceMissingStart) faceMissingStart = now;
 
-    if((now-faceMissingStart)/1000 >= FACE_MISSING_DELAY){
+    if((now - faceMissingStart) / 1000 >= FACE_MISSING_DELAY){
       alertReason.textContent = "🚨 顔が見えない（危険）";
       alertReason.className = "danger";
       setAlarmState(ALARM_STATE.DANGER);
@@ -230,12 +254,19 @@ faceMesh.onResults(res=>{
 
   faceMissingStart = null;
 
+  /* ---- 顔検出 ---- */
   const lm = res.multiFaceLandmarks[0];
-  const leftEye = lm[33], rightEye = lm[263], nose = lm[1], chin = lm[152];
+  const leftEye = lm[33];
+  const rightEye = lm[263];
+  const nose = lm[1];
+  const chin = lm[152];
 
-  const rawYaw = Math.atan2(rightEye.z-leftEye.z, rightEye.x-leftEye.x)*180/Math.PI;
-  const eyeCenterY = (leftEye.y+rightEye.y)/2;
-  const rawPitch = ((nose.y-eyeCenterY)/(chin.y-eyeCenterY))*48 + PITCH_FIXED_OFFSET;
+  const rawYaw =
+    Math.atan2(rightEye.z - leftEye.z, rightEye.x - leftEye.x) * 180 / Math.PI;
+
+  const eyeCenterY = (leftEye.y + rightEye.y) / 2;
+  const rawPitch =
+    ((nose.y - eyeCenterY) / (chin.y - eyeCenterY)) * 48 + PITCH_FIXED_OFFSET;
 
   latestRawYaw = rawYaw;
   latestRawPitch = rawPitch;
@@ -272,18 +303,20 @@ faceMesh.onResults(res=>{
     eye: eyeRatio < EYE_VISIBILITY_THRESHOLD
   };
 
-  let warning = false;
+  let reasons = [];
 
-  for(const k of alarmKeys){
-    if(conditions[k]){
-      if(!alertTimers[k]) alertTimers[k] = now;
-      if((now-alertTimers[k])/1000 >= ALARM_DELAY) warning = true;
+  for(const key of alarmKeys){
+    if(conditions[key]){
+      if(!alertTimers[key]) alertTimers[key] = now;
+      if((now - alertTimers[key]) / 1000 >= ALARM_DELAY){
+        reasons.push(key);
+      }
     }else{
-      delete alertTimers[k];
+      delete alertTimers[key];
     }
   }
 
-  if(warning){
+  if(reasons.length > 0){
     alertReason.textContent = "⚠️ 姿勢異常";
     alertReason.className = "warning";
     setAlarmState(ALARM_STATE.WARNING);
