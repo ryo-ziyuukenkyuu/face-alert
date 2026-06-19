@@ -310,7 +310,14 @@ const camera = new Camera(
     }
 );
 
-camera.start();
+navigator.mediaDevices
+    .getUserMedia({
+        video: {
+            facingMode: "environment"
+        }
+    })
+
+//camera.start();
 
 draw();
 document
