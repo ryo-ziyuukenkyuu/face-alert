@@ -1,156 +1,120 @@
 <!DOCTYPE html>
+
 <html lang="ja">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Face Alert</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Face Alert</title>
 
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-
+```
 <style>
-  body {
-    font-family: sans-serif;
-    background: #111;
-    color: #fff;
-    text-align: center;
-  }
+    body {
+        margin: 0;
+        background: #111;
+        color: white;
+        font-family: Arial, sans-serif;
+        text-align: center;
+    }
 
-  video {
-    width: 100%;
-    max-width: 420px;
-    transform: scaleX(-1);
-  }
+    h1 {
+        margin: 10px 0;
+    }
 
-  .panel {
-    margin-top: 10px;
-    padding: 10px;
-    background: #222;
-    border-radius: 8px;
-  }
+    #container {
+        position: relative;
+        width: 100%;
+        max-width: 900px;
+        margin: auto;
+    }
 
-  .alert-panel {
-    background: #300;
-    color: #ff8080;
-    font-weight: bold;
-  }
+    video,
+    canvas {
+        width: 100%;
+        display: block;
+    }
 
-  button {
-    padding: 10px 20px;
-    font-size: 18px;
-    border-radius: 8px;
-    border: none;
-    font-weight: bold;
-    margin-top: 5px;
-  }
+    canvas {
+        position: absolute;
+        left: 0;
+        top: 0;
+        pointer-events: none;
+    }
 
-  button.start {
-    background: #2ecc71;
-    color: #000;
-  }
-
-  button.stop {
-    background: #e74c3c;
-    color: #000;
-  }
-
-  label {
-    display: block;
-    margin-top: 10px;
-  }
+    #status {
+        margin-top: 10px;
+        font-size: 24px;
+    }
 </style>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+```
+
 </head>
+
 <body>
 
-<!-- 1. 題名 -->
-<h2>Face Alert 6.0.13</h2>
+```
+<button id="enableAudio">
+    Enable Audio
+</button>
 
-<!-- 2. カメラ画面 -->
-<video id="video" autoplay muted playsinline></video>
+<h1>Face Alert</h1>
 
-<!-- 3. 開始/停止ボタン -->
-<div>
-  <button id="toggleBtn" class="start">▶ 開始</button>
-  <div id="statusText">🔴 停止中</div>
-  <!-- 追加: 外カメラ切替ボタン -->
-  <button id="switchCamBtn">📷 カメラ切替</button>
+<div id="container">
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
 </div>
 
-<!-- 4. 異常表示 -->
-<div class="alert-panel">
-  <div id="alertReason" class="safe">異常なし</div>
+<div id="status">
+    MediaPipe Loading...
 </div>
 
 <hr>
 
-<!-- 6. 現在値 -->
-<div id="currentValues">
-  <div>Yaw：<span id="yawValue">0</span>°</div>
-  <div>Pitch：<span id="pitchValue">0</span>°</div>
-  <div>鼻‐顎距離比：<span id="noseValue">1.00</span></div>
-  <div>顔面積比：<span id="areaValue">1.00</span></div>
-  <div>目の可視率：<span id="eyeValue">1.00</span></div>
+<h2>STATE</h2>
+
+<div id="state">
+    UNKNOWN
+</div>
+
+<h2>REASON</h2>
+
+<div id="reason">
+    -
 </div>
 
 <hr>
 
-<!-- 8. 設定値 -->
-<div id="settingsValues">
-  <label>Yaw許容角度
-    <input type="range" id="yawSlider" min="30" max="120" step="5" value="80">
-    <span id="yawLimit">80</span>°
-  </label>
+<h2>DETECTION</h2>
 
-  <label>Pitch許容角度
-    <input type="range" id="pitchSlider" min="5" max="60" step="5" value="25">
-    <span id="pitchLimit">25</span>
-  </label>
-
-  <hr>
-
-  <label>姿勢異常 継続時間（推奨0〜1秒）
-    <input type="range" id="timeSlider" min="0" max="1" step="0.1" value="0.8">
-    <span id="timeLimit">0.8</span> 秒
-  </label>
-
-  <label>顔未検出 継続時間（推奨2〜5秒）
-    <input type="range" id="faceMissingSlider" min="1" max="5" step="0.5" value="3">
-    <span id="faceMissingLimit">3.0</span> 秒
-  </label>
-
-  <hr>
-
-  <label>鼻‐顎距離比
-    <input type="range" id="noseSlider" min="0.3" max="0.9" step="0.05" value="0.55">
-    <span id="noseLimit">0.55</span>
-  </label>
-
-  <label>顔面積比
-    <input type="range" id="areaSlider" min="0.3" max="0.9" step="0.05" value="0.6">
-    <span id="areaLimit">0.60</span>
-  </label>
-
-  <label>目の可視率
-    <input type="range" id="eyeSlider" min="0.2" max="0.9" step="0.05" value="0.4">
-    <span id="eyeLimit">0.40</span>
-  </label>
+<div id="debugInfo">
+    -
 </div>
 
-<!-- 9. 0点キャリブレーションボタン -->
-<div>
-  <button id="calibBtn">🎯 0点キャリブレーション</button>
+<hr>
+
+<h2>STATE HISTORY</h2>
+
+<div id="historyList">
 </div>
 
-<!-- 10. アラーム音 -->
-<audio id="softAlarm">
-  <source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg">
-</audio>
+<script type="module" src="./main.js"></script>
+```
 
-<audio id="hardAlarm">
-  <source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg">
-</audio>
-
-<!-- 11. スクリプト -->
-<script src="script.js"></script>
 </body>
+
+<h2>CANDIDATE</h2>
+
+<div id="candidateState">
+    UNKNOWN
+</div>
+
+<div id="candidateTime">
+    0.0
+</div>
+
 </html>
