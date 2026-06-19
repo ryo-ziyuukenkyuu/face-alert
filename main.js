@@ -292,6 +292,8 @@ else {
 const camera = new Camera(
     video,
     {
+        facingMode: "environment",
+
         onFrame: async () => {
 
             await faceMesh.send({
@@ -305,19 +307,13 @@ const camera = new Camera(
             statusEl.textContent =
                 "RUNNING";
         },
+
         width: 1280,
         height: 720,
     }
 );
 
-navigator.mediaDevices
-    .getUserMedia({
-        video: {
-            facingMode: "environment"
-        }
-    })
-
-//camera.start();
+camera.start();
 
 draw();
 document
